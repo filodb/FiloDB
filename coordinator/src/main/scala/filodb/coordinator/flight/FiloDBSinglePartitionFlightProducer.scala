@@ -62,7 +62,6 @@ class FiloDBSinglePartitionFlightProducer(
   def executePlan(q: ExecPlan, querySession: QuerySession): Task[QueryResponse] = {
     q.execute(memStore, querySession)(queryScheduler)
       .executeOn(queryScheduler)
-      .asyncBoundary
       .onErrorHandle { t =>
         QueryError(q.queryContext.queryId, querySession.queryStats, t)
       }

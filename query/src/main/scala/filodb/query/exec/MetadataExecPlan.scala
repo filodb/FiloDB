@@ -10,7 +10,7 @@ import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
-import filodb.core.memstore.TimeSeriesStore
+import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.CardinalityStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
@@ -205,9 +205,9 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
                      paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
     source.filter(!_.rows().isEmpty).map(rv => {
-      val x = rv.rows().next()
-      // TODO: We expect only one column to be a map, pattern matching does not work, is there better way?
-      val sketchMap = x.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+      // the sketches may be split across rows, see LabelCardinalityExecPlan.sketchRows
+      val sketchMap = rv.rows().map(_.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])
+        .foldLeft(Map.empty[ZeroCopyUTF8String, ZeroCopyUTF8String])(_ ++ _)
           // .view.mapValues: Scala 2.13 deprecated Map.mapValues (returns lazy view); use explicit .view first
           val sketchMapIterator = (sketchMap.view.mapValues {
             sketch => ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString)}.toMap
@@ -245,6 +245,33 @@ trait LabelCardinalityExecPlan extends MetadataExecPlan {
    * Parameter deciding the sketch size to be used for approximating cardinality
    */
   val logK = 10
+
+  /**
+   * Max number of labels whose cardinality is returned when reading the labels of the matching part keys
+   */
+  val maxLabels = 200
+
+  /**
+   * Splits the label to sketch bytes entries into rows, each one map in its own record.  A record has to fit in a
+   * container, and RecordSchema.consumeMapItems reads the map length as a signed short.
+   */
+  protected def sketchRows(sketches: collection.Map[ZeroCopyUTF8String, CpcSketch],
+                           containerSize: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+    val maxRowBytes = math.min(Short.MaxValue, containerSize - 64)
+    val rows = mutable.ArrayBuffer(Map.empty[ZeroCopyUTF8String, ZeroCopyUTF8String])
+    var rowBytes = 0
+    sketches.foreach { case (label, sketch) =>
+      val sketchBytes = ZeroCopyUTF8String(sketch.toByteArray)
+      val entryBytes = 1 + label.numBytes + 2 + sketchBytes.numBytes // UTF8StringShort key, UTF8StringMedium value
+      if (rowBytes > 0 && rowBytes + entryBytes > maxRowBytes) {
+        rows += Map.empty
+        rowBytes = 0
+      }
+      rows(rows.size - 1) = rows.last + (label -> sketchBytes)
+      rowBytes += entryBytes
+    }
+    rows.iterator
+  }
 }
 final case class LabelCardinalityReduceExec(queryContext: QueryContext,
                                             dispatcher: PlanDispatcher,
@@ -317,10 +344,7 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
               UTF8MapIteratorRowReader(List.empty.toIterator), None))
           } else {
             val x = for ((key, sketchMap) <- metaDataMutableMap) yield {
-              val convertedSketchMap = sketchMap.map { case (k, cpcSketch) =>
-                k -> ZeroCopyUTF8String(cpcSketch.toByteArray)
-              }.toMap
-              val labelSketchMapIterator = Seq(convertedSketchMap).toIterator
+              val labelSketchMapIterator = sketchRows(sketchMap, maxRecordContainerSize(querySession.queryConfig))
               IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(labelSketchMapIterator), None)
             }
             Observable.fromIterable(x)
@@ -448,6 +472,28 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
     val rvs = source match {
+      case memstore: TimeSeriesMemStore if querySession.queryConfig.labelCardinalityPartKeyScanEnabled =>
+        // add the labels of each matching part key to the sketches while searching the index, instead of facets
+        val sketchMap = scala.collection.mutable.Map[ZeroCopyUTF8String, CpcSketch]()
+        memstore.foreachPartKeyLabelWithFilters(dataset, shard, filters, endMs, startMs) { (label, value) =>
+          // label and value point into buffers reused across part keys, so copy what is kept
+          if (value.numBytes > 0) {
+            var sketch = sketchMap.getOrElse(label, null)
+            if (sketch == null && sketchMap.size < maxLabels) {
+              sketch = new CpcSketch(logK)
+              sketchMap.put(ZeroCopyUTF8String(label.asNewByteArray), sketch)
+            }
+            if (sketch != null) {
+              sketch.update(value.asNewByteArray)
+            } else {
+              querySession.resultCouldBePartial = true
+              querySession.partialResultsReason = Some(s"Matching time series have more than $maxLabels labels")
+            }
+          }
+        }
+        if (sketchMap.isEmpty) Observable.empty else Observable.now(IteratorBackedRangeVector(
+          CustomRangeVectorKey.empty,
+          UTF8MapIteratorRowReader(sketchRows(sketchMap, maxRecordContainerSize(querySession.queryConfig))), None))
       case memstore: TimeSeriesStore =>
         // first get the list of label names, then fetch each label value and add to CPC sketch
         val labelNames = memstore.labelNames(dataset, shard, filters, endMs, startMs)
@@ -473,11 +519,8 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
           }
 
           val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty,
-            UTF8MapIteratorRowReader(
-              Seq(sketchMap.map {
-                case (label, cpcSketch) =>
-                  (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))
-              }.toMap).toIterator),
+            UTF8MapIteratorRowReader(sketchRows(sketchMap.map { case (label, sketch) => (label.utf8, sketch) },
+              maxRecordContainerSize(querySession.queryConfig))),
             None)
           Observable.now(rv)
         } else {

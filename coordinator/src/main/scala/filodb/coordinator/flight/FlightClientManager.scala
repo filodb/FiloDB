@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.scalalogging.StrictLogging
-import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
+import io.grpc.netty.NettyChannelBuilder
 import monix.execution.{CancelableFuture, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import org.apache.arrow.flight.{CallOptions, FlightClient, FlightGrpcUtils, Location}
@@ -53,6 +53,7 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
   private val healthCheckInterval = FiniteDuration(flightClientConfig.getDuration("health-check-interval").toMillis,
                                       TimeUnit.MILLISECONDS)
   private val healthCheckTimeoutMs = flightClientConfig.getDuration("health-check-timeout").toMillis
+  private val maxInboundMessageSize = Math.toIntExact(flightClientConfig.getBytes("max-inbound-message-size"))
 
   // Client storage and metadata
   private val clientMap = new ConcurrentHashMap[String, FlightClientEntry]()
@@ -157,6 +158,7 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
 
       val channel1 = NettyChannelBuilder.forAddress(location.getUri.getHost, location.getUri.getPort)
         .usePlaintext()
+        .maxInboundMessageSize(maxInboundMessageSize)
       val channel2 = if (compressionEnabled) {
         channel1.intercept(ZstdClientInterceptor)
           .compressorRegistry(ZstdCodecs.compressorRegistry)
@@ -172,7 +174,8 @@ class FlightClientManager(allocator: BufferAllocator) extends StrictLogging {
         createdAt = System.currentTimeMillis(),
         lastHealthCheck = new AtomicLong(0)
       )
-      logger.info(s"Successfully created FlightClient for $location with compression = $compressionEnabled")
+      logger.info(s"Successfully created FlightClient for $location with compression = $compressionEnabled, " +
+        s"maxInboundMessageSize = $maxInboundMessageSize")
       entry
     } catch {
       case ex: Exception =>
