@@ -186,6 +186,8 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     index3.startTimeFromPartId(0) shouldEqual 5
     index3.endTimeFromPartId(0) shouldEqual Long.MaxValue
 
+    index3.labelNamesEfficient(filters1, 0, Long.MaxValue).toSet shouldEqual
+      Set("_ws_", "_ns_", "_metric_", "_type_", "instance")
   }
 
   it("should be able to do regular operations when faceting is disabled and additional faceting in dataset") {

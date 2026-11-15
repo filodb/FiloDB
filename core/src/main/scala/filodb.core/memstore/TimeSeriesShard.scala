@@ -29,6 +29,7 @@ import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.memstore.synchronization.{CassandraPartKeyUpdatesPublisher, PartKeyUpdatesPublisher}
 import filodb.core.metadata.{Schema, Schemas}
+import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
@@ -2029,6 +2030,41 @@ class TimeSeriesShard(val ref: DatasetRef,
         convertPartKeyWithTimesToMap(partKeyFromPartId(partId))})
       (inMemPartKeys ++ skippedPartKeys)
     }
+  }
+
+  /**
+   * Calls func with the name and value of each label of each partKey matching the filters, including _type_, while
+   * searching the index.  The name and value point into buffers reused across calls; copy them to retain them.
+   */
+  def foreachPartKeyLabelWithFilters(filters: Seq[ColumnFilter], endTime: Long, startTime: Long)
+                                    (func: (ZeroCopyUTF8String, ZeroCopyUTF8String) => Unit): Int = {
+    val binSchema = schemas.part.binSchema
+    val columns = binSchema.columnTypes.zip(binSchema.colNames.map(_.utf8)).zipWithIndex
+    val typeLabel = Schemas.TypeLabel.utf8
+    val mapConsumer = new MapItemConsumer {
+      def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+        val label = new ZeroCopyUTF8String(keyBase, keyOffset + 1, UTF8StringShort.numBytes(keyBase, keyOffset))
+        // the _type_ label is derived from the schema, as in convertPartKeyWithTimesToMap
+        val valueNumBytes = UTF8StringMedium.numBytes(valueBase, valueOffset)
+        if (label != typeLabel) func(label, new ZeroCopyUTF8String(valueBase, valueOffset + 2, valueNumBytes))
+      }
+    }
+    var schemaId = -1
+    var schemaName = ZeroCopyUTF8String.empty
+    partKeyIndex.foreachPartKeyMatchingFilter(filters, startTime, endTime, { partKey =>
+      val offset = PartKeyIndexRaw.bytesRefToUnsafeOffset(partKey.offset)
+      columns.foreach {
+        case ((StringColumn, name), i) => func(name, binSchema.asZCUTF8Str(partKey.bytes, offset, i))
+        case ((MapColumn, _), i)       => binSchema.consumeMapItems(partKey.bytes, offset, i, mapConsumer)
+        case _                         =>
+      }
+      val id = RecordSchema.schemaID(partKey.bytes, offset)
+      if (id != schemaId) {
+        schemaId = id
+        schemaName = Schemas.global.schemaName(id).utf8
+      }
+      func(typeLabel, schemaName)
+    })
   }
 
   private def convertPartKeyWithTimesToMap(partKey: PartKeyWithTimes): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {

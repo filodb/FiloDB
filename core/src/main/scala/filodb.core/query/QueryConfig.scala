@@ -54,6 +54,8 @@ object QueryConfig {
     val scCacheSize = queryConfig.as[Int]("single.cluster.cache.cache-size")
     val cachingConfig = CachingConfig(scCachingEnabled, scCacheSize)
     val enableLocalDispatch = queryConfig.getBoolean("enable-local-dispatch")
+    val labelCardinalityPartKeyScanEnabled =
+      queryConfig.as[Option[Boolean]]("label-cardinality-partkey-scan-enabled").getOrElse(false)
 
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
       true, routingConfig.as[Option[String]]("partition_name"),
@@ -65,7 +67,7 @@ object QueryConfig {
       grpcDenyList.split(",").map(_.trim.toLowerCase).toSet,
       flightDenyList.split(",").map(_.trim.toLowerCase).toSet,
       None,
-      containerOverrides, rc, cachingConfig, enableLocalDispatch)
+      containerOverrides, rc, cachingConfig, enableLocalDispatch, labelCardinalityPartKeyScanEnabled)
   }
   // scalastyle:on method.length
 
@@ -127,4 +129,5 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        recordContainerOverrides: Map[String, Int] = Map.empty,
                        routingConfig: RoutingConfig               = RoutingConfig(),
                        cachingConfig: CachingConfig               = CachingConfig(),
-                       enableLocalDispatch: Boolean = false)
+                       enableLocalDispatch: Boolean = false,
+                       labelCardinalityPartKeyScanEnabled: Boolean = false)
