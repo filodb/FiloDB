@@ -180,19 +180,12 @@ case class MinDownsampler(override val inputColIds: Seq[Int]) extends DoubleChun
                                chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    // TODO MinOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
     val vecAcc = chunkset.vectorAccessor(inputColIds(0))
     val vecPtr = chunkset.vectorAddress(inputColIds(0))
-    val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr)
-    var min = Double.MaxValue
-    var rowNum = startRow
-    val it = colReader.iterate(vecAcc, vecPtr, startRow).asDoubleIt
-    while (rowNum <= endRow) {
-      val nextVal = it.next
-      if (!JLDouble.isNaN(nextVal)) min = Math.min(min, nextVal)
-      rowNum += 1
-    }
-    min
+    val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr).asDoubleReader
+    // NaN values are ignored. If there are no non-NaN values, the downsampled min is Double.MaxValue, as before.
+    val min = colReader.min(vecAcc, vecPtr, startRow, endRow)
+    if (JLDouble.isNaN(min)) Double.MaxValue else min
   }
 }
 
@@ -241,19 +234,12 @@ case class MaxDownsampler(override val inputColIds: Seq[Int]) extends DoubleChun
                                chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    // TODO MaxOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
     val vecAcc = chunkset.vectorAccessor(inputColIds(0))
     val vecPtr = chunkset.vectorAddress(inputColIds(0))
-    val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr)
-    var max = Double.MinValue
-    var rowNum = startRow
-    val it = colReader.iterate(vecAcc, vecPtr, startRow).asDoubleIt
-    while (rowNum <= endRow) {
-      val nextVal = it.next
-      if (!JLDouble.isNaN(nextVal)) max = Math.max(max, nextVal)
-      rowNum += 1
-    }
-    max
+    val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr).asDoubleReader
+    // NaN values are ignored. If there are no non-NaN values, the downsampled max is Double.MinValue, as before.
+    val max = colReader.max(vecAcc, vecPtr, startRow, endRow)
+    if (JLDouble.isNaN(max)) Double.MinValue else max
   }
 }
 

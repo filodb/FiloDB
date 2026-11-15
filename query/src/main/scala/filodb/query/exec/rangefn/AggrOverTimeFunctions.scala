@@ -68,21 +68,27 @@ class MinOverTimeChunkedFunctionD(var min: Double = Double.NaN,
                                                 doubleReader: bv.DoubleVectorDataReader,
                                                 startRowNum: Int,
                                                 endRowNum: Int): Unit = {
-    var rowNum = startRowNum
-    val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
-    while (rowNum <= endRowNum) {
-      val nextVal = it.next
-      val nextTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
-      // Handle NaN values properly for timestamp functions
-      if (min != min) { // min is NaN
-        min = nextVal
-        minTimestamp = nextTimestamp
-      } else if (nextVal != nextVal) { // nextVal is NaN, keep current min
-      } else if (nextVal <= min) {
-        min = nextVal
-        minTimestamp = nextTimestamp
+    if (emitTimestamp) {
+      var rowNum = startRowNum
+      val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
+      while (rowNum <= endRowNum) {
+        val nextVal = it.next
+        val nextTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
+        // Handle NaN values properly for timestamp functions
+        if (min != min) { // min is NaN
+          min = nextVal
+          minTimestamp = nextTimestamp
+        } else if (nextVal != nextVal) { // nextVal is NaN, keep current min
+        } else if (nextVal <= min) {
+          min = nextVal
+          minTimestamp = nextTimestamp
+        }
+        rowNum += 1
       }
-      rowNum += 1
+    } else {
+      // Timestamps are not needed, so use the vector's range min, which avoids allocating an iterator per call.
+      // Same NaN handling as above: NaN is ignored unless every value is NaN.
+      min = bv.DoubleVectorDataReader.minOf(min, doubleReader.min(doubleVectAcc, doubleVect, startRowNum, endRowNum))
     }
   }
 }
@@ -153,21 +159,27 @@ class MaxOverTimeChunkedFunctionD(var max: Double = Double.NaN,
                                                 doubleReader: bv.DoubleVectorDataReader,
                                                 startRowNum: Int,
                                                 endRowNum: Int): Unit = {
-    var rowNum = startRowNum
-    val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
-    while (rowNum <= endRowNum) {
-      val nextVal = it.next
-      val nextTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
-      // Handle NaN values properly for timestamp functions
-      if (max != max) { // max is NaN
-        max = nextVal
-        maxTimestamp = nextTimestamp
-      } else if (nextVal != nextVal) { // nextVal is NaN, keep current max
-      } else if (nextVal >= max) {
-        max = nextVal
-        maxTimestamp = nextTimestamp
+    if (emitTimestamp) {
+      var rowNum = startRowNum
+      val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
+      while (rowNum <= endRowNum) {
+        val nextVal = it.next
+        val nextTimestamp = tsReader(tsVectorAcc, tsVector, rowNum)
+        // Handle NaN values properly for timestamp functions
+        if (max != max) { // max is NaN
+          max = nextVal
+          maxTimestamp = nextTimestamp
+        } else if (nextVal != nextVal) { // nextVal is NaN, keep current max
+        } else if (nextVal >= max) {
+          max = nextVal
+          maxTimestamp = nextTimestamp
+        }
+        rowNum += 1
       }
-      rowNum += 1
+    } else {
+      // Timestamps are not needed, so use the vector's range max, which avoids allocating an iterator per call.
+      // Same NaN handling as above: NaN is ignored unless every value is NaN.
+      max = bv.DoubleVectorDataReader.maxOf(max, doubleReader.max(doubleVectAcc, doubleVect, startRowNum, endRowNum))
     }
   }
 }

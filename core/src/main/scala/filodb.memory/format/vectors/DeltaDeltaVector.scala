@@ -193,6 +193,37 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
       IntBinaryVector.simple(acc, inner).sum(acc, inner, start, end)
   }
 
+  // value(n) = initValue + slope * n + inner(n), the same values iterate() produces. end is inclusive.
+  final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    val inner = vector + InnerVectorOffset
+    val innerReader = IntBinaryVector.simple(acc, inner)
+    val _slope = slope(acc, vector)
+    var curBase = initValue(acc, vector) + start * _slope.toLong
+    var min = Long.MaxValue
+    cforRange { start to end } { n =>
+      min = Math.min(min, curBase + innerReader(acc, inner, n))
+      curBase += _slope
+    }
+    min
+  }
+
+  final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    val inner = vector + InnerVectorOffset
+    val innerReader = IntBinaryVector.simple(acc, inner)
+    val _slope = slope(acc, vector)
+    var curBase = initValue(acc, vector) + start * _slope.toLong
+    var max = Long.MinValue
+    cforRange { start to end } { n =>
+      max = Math.max(max, curBase + innerReader(acc, inner, n))
+      curBase += _slope
+    }
+    max
+  }
+
   // Efficient iterator as we keep track of current value and inner iterator
   class DeltaDeltaIterator(innerIt: IntIterator, slope: Int, var curBase: Long) extends LongIterator {
     final def next: Long = {
@@ -260,6 +291,24 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is " +
       s"out of bounds, length=${length(acc, vector)}")
     slopeSum(initValue(acc, vector), slope(acc, vector), start, end)
+  }
+
+  // All values lie on a line, so the min and max are at the two ends of the range. Computed with Long arithmetic
+  // like iterate(). end is inclusive.
+  final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    val initVal = initValue(acc, vector)
+    val _slope = slope(acc, vector).toLong
+    Math.min(initVal + start * _slope, initVal + end * _slope)
+  }
+
+  final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    val initVal = initValue(acc, vector)
+    val _slope = slope(acc, vector).toLong
+    Math.max(initVal + start * _slope, initVal + end * _slope)
   }
 
   private[memory] def slopeSum(initVal: Long, slope: Int, start: Int, end: Int): Double = {

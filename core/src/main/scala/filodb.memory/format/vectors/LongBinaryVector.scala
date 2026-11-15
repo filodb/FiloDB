@@ -142,6 +142,28 @@ trait LongVectorDataReader extends VectorDataReader {
   def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double
 
   /**
+   * Minimum of the Long values from position start to position end (inclusive). Requires start <= end.
+   * The default implementation iterates; encodings override it to avoid allocating an iterator.
+   */
+  def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    val it = iterate(acc, vector, start)
+    var min = Long.MaxValue
+    cforRange { start to end } { _ => min = Math.min(min, it.next) }
+    min
+  }
+
+  /**
+   * Maximum of the Long values from position start to position end (inclusive). Requires start <= end.
+   * The default implementation iterates; encodings override it to avoid allocating an iterator.
+   */
+  def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    val it = iterate(acc, vector, start)
+    var max = Long.MinValue
+    cforRange { start to end } { _ => max = Math.max(max, it.next) }
+    max
+  }
+
+  /**
    * Efficiently searches for the first element # where the vector element is greater than or equal to item.
    * Good for finding the startElement for iterate() above where time is at least item.
    * Assumes all the elements of vector are in increasing numeric order.
@@ -205,6 +227,34 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     acc.getLong(vector + OffsetData + n * 8)
   def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
     new Long64Iterator(acc, vector + OffsetData + startElement * 8)
+
+  // end is inclusive
+  final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    var addr = vector + OffsetData + start * 8
+    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
+    var min = Long.MaxValue
+    while (addr < untilAddr) {
+      min = Math.min(min, acc.getLong(addr))
+      addr += 8
+    }
+    min
+  }
+
+  // end is inclusive
+  final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    var addr = vector + OffsetData + start * 8
+    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
+    var max = Long.MinValue
+    while (addr < untilAddr) {
+      max = Math.max(max, acc.getLong(addr))
+      addr += 8
+    }
+    max
+  }
 
   // end is inclusive
   final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
@@ -283,6 +333,12 @@ object MaskedLongDataReader extends LongVectorDataReader with BitmapMaskVector {
 
   final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double =
     LongBinaryVector(acc, subvectAddr(acc, vector)).sum(acc, subvectAddr(acc, vector), start, end)
+
+  final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long =
+    LongBinaryVector(acc, subvectAddr(acc, vector)).min(acc, subvectAddr(acc, vector), start, end)
+
+  final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long =
+    LongBinaryVector(acc, subvectAddr(acc, vector)).max(acc, subvectAddr(acc, vector), start, end)
 
   def binarySearch(acc: MemoryReader, vector: BinaryVectorPtr, item: Long): Int =
     LongBinaryVector(acc, subvectAddr(acc, vector)).binarySearch(acc, subvectAddr(acc, vector), item)
