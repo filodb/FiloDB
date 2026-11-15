@@ -2,6 +2,7 @@ package filodb.memory.format.vectors
 
 import debox.Buffer
 import org.agrona.DirectBuffer
+import org.agrona.concurrent.UnsafeBuffer
 import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
@@ -159,6 +160,10 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
   // we were using maxPositiveBuckets (without +1) and not accommodating zero bucket
   private val returnHist = LongHistogram(buckets, new Array[Long](Base2ExpHistogramBuckets.maxPositiveBuckets + 1))
   protected val dSink = NibblePack.DeltaSink(returnHist.values)
+  // Per-reader scratch state used in apply(). Readers already hold mutable state (returnHist, dSink) and are not
+  // shared across threads, so these avoid ThreadLocal lookups per decoded histogram on the hot path.
+  private val valuesBuf: DirectBuffer = new UnsafeBuffer(Array.empty[Byte])
+  private val unpackScratch = new Array[Long](8)
 
   /**
    * Returns a histogram for the given index.  The histogram is a shared instance and should not be modified.
@@ -172,7 +177,7 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
     require(length > 0)
     val histPtr = locate(index)
     val histLen = histPtr.asU16.getU16(acc)
-    val buf = BinaryHistogram.valuesBuf
+    val buf = valuesBuf
     acc.wrapInto(buf, histPtr.add(2).addr, histLen)
 
     val binHist = BinaryHistogram.BinHistogram(buf)
@@ -183,8 +188,9 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
 
     dSink.reset()
     dSink.setLength(bucketDef.numBuckets)
-    val buf2 = binHist.valuesByteSlice // no object allocation here, valuesBuf is reused
-    NibblePack.unpackToSink(buf2, dSink, bucketDef.numBuckets)
+    // Same as binHist.valuesByteSlice, but re-wraps our own buffer instead of the thread local one
+    UnsafeUtils.wrapDirectBuf(buf.byteArray, buf.addressOffset + binHist.valuesIndex, binHist.valuesNumBytes, buf)
+    NibblePack.unpackToSink(buf, dSink, bucketDef.numBuckets, unpackScratch)
     returnHist
   }
 

@@ -721,10 +721,11 @@ extends TimeRangeFunction[TransientHistRow] {
                                                 reader: VectorDataReader,
                                                 startRowNum: Int,
                                                 endRowNum: Int): Unit = {
+    // HistogramReader.sum always returns a newly allocated MutableHistogram that the reader does not retain,
+    // so we can take ownership of it directly without a defensive copy
     val sum = reader.asHistReader.sum(startRowNum, endRowNum)
     h match {
-      // sum is mutable histogram, copy to be sure it's our own copy
-      case hist if hist.numBuckets == 0 => h = sum.copy
+      case hist if hist.numBuckets == 0 => h = sum
       case hist: bv.MutableHistogram    => hist.add(sum)
     }
   }

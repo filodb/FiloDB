@@ -520,7 +520,7 @@ final case class MutableHistogram(var buckets: HistogramBuckets,
       } else if (ourBuckets.numPositiveBuckets == 0) { // zero-only
         buckets = otherBuckets.copy() // just use the other buckets
         val thisValues = values
-        values = other.valueArray.clone()
+        values = other.valueArray // valueArray already returns a freshly allocated array, no need to clone
         values(0) += thisValues(0)
         false
       } else if (otherBuckets.numPositiveBuckets == 0) { // zero-only
@@ -584,8 +584,12 @@ final case class MutableHistogram(var buckets: HistogramBuckets,
 }
 
 object MutableHistogram {
-  def empty(buckets: HistogramBuckets): MutableHistogram =
-    MutableHistogram(buckets, Array.fill(buckets.numBuckets)(Double.NaN))
+  def empty(buckets: HistogramBuckets): MutableHistogram = {
+    // Avoid scala.Array.fill: it evaluates a by-name Function0 per element and boxes each Double
+    val values = new Array[Double](buckets.numBuckets)
+    java.util.Arrays.fill(values, Double.NaN)
+    MutableHistogram(buckets, values)
+  }
 
   def fromPacked(bucketDef: HistogramBuckets, packedValues: DirectBuffer): Option[MutableHistogram] = {
     val values = new Array[Double](bucketDef.numBuckets)

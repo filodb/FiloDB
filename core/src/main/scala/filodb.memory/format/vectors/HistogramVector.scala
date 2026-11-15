@@ -590,16 +590,20 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
   def length(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
 
   protected val dSink = NibblePack.DeltaSink(returnHist.values)
+  // Per-reader scratch state. Readers already hold mutable state (returnHist, dSink) and are not shared across
+  // threads, so these avoid ThreadLocal lookups per decoded histogram on the hot path.
+  protected val valuesBuf: DirectBuffer = new UnsafeBuffer(Array.empty[Byte])
+  protected val unpackScratch = new Array[Long](8)
 
   // WARNING: histogram returned is shared between calls, do not reuse!
   def apply(index: Int): HistogramWithBuckets = {
     require(length > 0)
     val histPtr = locate(index)
     val histLen = histPtr.asU16.getU16(acc)
-    val buf = BinaryHistogram.valuesBuf
+    val buf = valuesBuf
     acc.wrapInto(buf, histPtr.add(2).addr, histLen)
     dSink.reset()
-    NibblePack.unpackToSink(buf, dSink, numBuckets)
+    NibblePack.unpackToSink(buf, dSink, numBuckets, unpackScratch)
     returnHist
   }
 
@@ -637,9 +641,9 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
     super.setSection(sectAddr, newElemNo)
     // unpack to baseHist
     baseSink.reset()
-    val buf = BinaryHistogram.valuesBuf
+    val buf = valuesBuf
     acc.wrapInto(buf, curHist.add(2).addr, curHist.asU16.getU16(acc))
-    NibblePack.unpackToSink(buf, baseSink, numBuckets)
+    NibblePack.unpackToSink(buf, baseSink, numBuckets, unpackScratch)
   }
 
   override def apply(index: Int): HistogramWithBuckets = {
@@ -653,10 +657,10 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
     if (index == sectStartingElemNo) baseHist
     else {
       val histLen = histPtr.asU16.getU16(acc)
-      val buf = BinaryHistogram.valuesBuf
+      val buf = valuesBuf
       acc.wrapInto(buf, histPtr.add(2).addr, histLen)
       dSink.reset()
-      NibblePack.unpackToSink(buf, dSink, numBuckets)
+      NibblePack.unpackToSink(buf, dSink, numBuckets, unpackScratch)
 
       summedHist.populateFrom(baseHist)
       summedHist.add(returnHist)
