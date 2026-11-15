@@ -596,6 +596,9 @@ extends Iterator[ChunkSetInfoReader] {
 
   final def lock(): Unit = infos.lock()
   final def unlock(): Unit = infos.unlock()
+
+  // Visible for testing: current capacity of the window infos array
+  private[filodb] def windowInfosCapacity: Int = windowInfos.length
 }
 
 /**
