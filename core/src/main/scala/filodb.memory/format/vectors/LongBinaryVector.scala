@@ -146,6 +146,8 @@ trait LongVectorDataReader extends VectorDataReader {
    * The default implementation iterates; encodings override it to avoid allocating an iterator.
    */
   def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && start <= end && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
     val it = iterate(acc, vector, start)
     var min = Long.MaxValue
     cforRange { start to end } { _ => min = Math.min(min, it.next) }
@@ -157,6 +159,8 @@ trait LongVectorDataReader extends VectorDataReader {
    * The default implementation iterates; encodings override it to avoid allocating an iterator.
    */
   def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && start <= end && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
     val it = iterate(acc, vector, start)
     var max = Long.MinValue
     cforRange { start to end } { _ => max = Math.max(max, it.next) }
@@ -230,7 +234,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
 
   // end is inclusive
   final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
-    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+    require(start >= 0 && start <= end && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
@@ -244,7 +248,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
 
   // end is inclusive
   final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
-    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+    require(start >= 0 && start <= end && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end

@@ -155,6 +155,8 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    * The default implementation iterates; encodings override it to avoid allocating an iterator.
    */
   def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
     val it = iterate(acc, vector, start)
     var min = Double.NaN
     cforRange { start to end } { _ => min = DoubleVectorDataReader.minOf(min, it.next) }
@@ -167,6 +169,8 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    * The default implementation iterates; encodings override it to avoid allocating an iterator.
    */
   def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
     val it = iterate(acc, vector, start)
     var max = Double.NaN
     cforRange { start to end } { _ => max = DoubleVectorDataReader.maxOf(max, it.next) }

@@ -195,7 +195,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
 
   // value(n) = initValue + slope * n + inner(n), the same values iterate() produces. end is inclusive.
   final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
-    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+    require(start >= 0 && start <= end && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
     val inner = vector + InnerVectorOffset
     val innerReader = IntBinaryVector.simple(acc, inner)
@@ -210,7 +210,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
   }
 
   final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
-    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+    require(start >= 0 && start <= end && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
     val inner = vector + InnerVectorOffset
     val innerReader = IntBinaryVector.simple(acc, inner)
@@ -296,7 +296,7 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
   // All values lie on a line, so the min and max are at the two ends of the range. Computed with Long arithmetic
   // like iterate(). end is inclusive.
   final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
-    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+    require(start >= 0 && start <= end && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
     val initVal = initValue(acc, vector)
     val _slope = slope(acc, vector).toLong
@@ -304,7 +304,7 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
   }
 
   final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
-    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+    require(start >= 0 && start <= end && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
     val initVal = initValue(acc, vector)
     val _slope = slope(acc, vector).toLong

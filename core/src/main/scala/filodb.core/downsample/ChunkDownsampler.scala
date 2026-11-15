@@ -1,7 +1,5 @@
 package filodb.core.downsample
 
-import java.lang.{Double => JLDouble}
-
 import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.metadata.Column.ColumnType
@@ -183,9 +181,8 @@ case class MinDownsampler(override val inputColIds: Seq[Int]) extends DoubleChun
     val vecAcc = chunkset.vectorAccessor(inputColIds(0))
     val vecPtr = chunkset.vectorAddress(inputColIds(0))
     val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr).asDoubleReader
-    // NaN values are ignored. If there are no non-NaN values, the downsampled min is Double.MaxValue, as before.
-    val min = colReader.min(vecAcc, vecPtr, startRow, endRow)
-    if (JLDouble.isNaN(min)) Double.MaxValue else min
+    // NaN values are ignored.
+    colReader.min(vecAcc, vecPtr, startRow, endRow)
   }
 }
 
@@ -237,9 +234,8 @@ case class MaxDownsampler(override val inputColIds: Seq[Int]) extends DoubleChun
     val vecAcc = chunkset.vectorAccessor(inputColIds(0))
     val vecPtr = chunkset.vectorAddress(inputColIds(0))
     val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr).asDoubleReader
-    // NaN values are ignored. If there are no non-NaN values, the downsampled max is Double.MinValue, as before.
-    val max = colReader.max(vecAcc, vecPtr, startRow, endRow)
-    if (JLDouble.isNaN(max)) Double.MinValue else max
+    // NaN values are ignored.
+    colReader.max(vecAcc, vecPtr, startRow, endRow)
   }
 }
 

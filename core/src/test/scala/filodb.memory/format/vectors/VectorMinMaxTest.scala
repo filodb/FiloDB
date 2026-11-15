@@ -8,7 +8,8 @@ import filodb.memory.format.BinaryVector.BinaryVectorPtr
  */
 class VectorMinMaxTest extends NativeVectorTest {
 
-  // Reference: the original per element loop of MinOverTimeChunkedFunctionD / MaxOverTimeChunkedFunctionD
+  // Reference: the original per element loop of MinOverTimeChunkedFunctionD / MaxOverTimeChunkedFunctionD.
+  // MinDownsampler / MaxDownsampler return the range min/max directly, so this covers them too.
   private def refMinMax(reader: DoubleVectorDataReader, vect: BinaryVectorPtr, start: Int, end: Int) = {
     var min = Double.NaN
     var max = Double.NaN
@@ -24,18 +25,6 @@ class VectorMinMaxTest extends NativeVectorTest {
   // Compares doubles exactly: NaN equals NaN, and 0.0 differs from -0.0
   private def sameDouble(a: Double, b: Double): Boolean = java.lang.Double.compare(a, b) == 0
 
-  // Reference: the original per element loop of MinDownsampler / MaxDownsampler
-  private def refDownsampleMinMax(reader: DoubleVectorDataReader, vect: BinaryVectorPtr, start: Int, end: Int) = {
-    var min = Double.MaxValue
-    var max = Double.MinValue
-    val it = reader.iterate(acc, vect, start)
-    for { _ <- start to end } {
-      val v = it.next
-      if (!java.lang.Double.isNaN(v)) { min = Math.min(min, v); max = Math.max(max, v) }
-    }
-    (min, max)
-  }
-
   private def checkDouble(reader: DoubleVectorDataReader, vect: BinaryVectorPtr): Unit = {
     val len = reader.length(acc, vect)
     // empty ranges
@@ -45,15 +34,12 @@ class VectorMinMaxTest extends NativeVectorTest {
         reader.max(acc, vect, start, start - 1).isNaN shouldEqual true
       }
     }
-    for { start <- 0 until len; end <- start until len } {
-      // the downsamplers' formula: same numeric result as their original loop
-      val (dsExpMin, dsExpMax) = refDownsampleMinMax(reader, vect, start, end)
-      val dsMin = { val m = reader.min(acc, vect, start, end); if (m.isNaN) Double.MaxValue else m }
-      val dsMax = { val m = reader.max(acc, vect, start, end); if (m.isNaN) Double.MinValue else m }
-      withClue(s"downsample ${reader.getClass.getSimpleName} range [$start, $end]: ") {
-        dsMin shouldEqual dsExpMin
-        dsMax shouldEqual dsExpMax
-      }
+    // out of bounds ranges must not read past the vector
+    withClue(s"${reader.getClass.getSimpleName} out of bounds: ") {
+      intercept[IllegalArgumentException] { reader.min(acc, vect, 0, len) }
+      intercept[IllegalArgumentException] { reader.max(acc, vect, 0, len) }
+      intercept[IllegalArgumentException] { reader.min(acc, vect, -1, 0) }
+      intercept[IllegalArgumentException] { reader.max(acc, vect, -1, 0) }
     }
     for { start <- 0 until len; end <- start until len } {
       val (expMin, expMax) = refMinMax(reader, vect, start, end)
@@ -69,6 +55,13 @@ class VectorMinMaxTest extends NativeVectorTest {
 
   private def checkLong(reader: LongVectorDataReader, vect: BinaryVectorPtr): Unit = {
     val len = reader.length(acc, vect)
+    // empty and out of bounds ranges are rejected, rather than returning a value that is not in the range
+    withClue(s"${reader.getClass.getSimpleName} invalid ranges: ") {
+      intercept[IllegalArgumentException] { reader.min(acc, vect, 5, 4) }
+      intercept[IllegalArgumentException] { reader.max(acc, vect, 5, 4) }
+      intercept[IllegalArgumentException] { reader.min(acc, vect, 0, len) }
+      intercept[IllegalArgumentException] { reader.max(acc, vect, 0, len) }
+    }
     for { start <- 0 until len; end <- start until len } {
       val it = reader.iterate(acc, vect, start)
       val values = (start to end).map(_ => it.next)
