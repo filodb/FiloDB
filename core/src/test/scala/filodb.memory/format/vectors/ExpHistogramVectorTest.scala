@@ -212,6 +212,38 @@ class ExpHistogramVectorTest extends NativeVectorTest {
     BinHistogram(sumHist.serialize()).formatCode shouldEqual HistFormat_OtelExp_XOR
   }
 
+  it("sum should match adding each histogram to an empty histogram, across bucket scheme changes") {
+    val rnd = new scala.util.Random(42)
+    val schemes = Seq(Base2ExpHistogramBuckets(3, -10, 20),
+                      Base2ExpHistogramBuckets(2, -5, 10),    // lower scale
+                      Base2ExpHistogramBuckets(3, -12, 30),   // more buckets, grows the reader's decode array
+                      Base2ExpHistogramBuckets(3, 0, 0))      // zero bucket only
+    val hists = (0 until 100).map { i =>
+      val scheme = schemes(if (i % 10 == 0) (i / 10) % schemes.size else 0)
+      val values = new Array[Long](scheme.numBuckets)
+      var running = 0L
+      values.indices.foreach { b => running += rnd.nextInt(1000); values(b) = running }
+      LongHistogram(scheme, values)
+    }
+    val appender = HistogramVector.appendingExp(memFactory, 64 * 1024)
+    val buf = new UnsafeBuffer(new Array[Byte](8192))
+    hists.foreach { h =>
+      BinaryHistogram.writeDelta(h.buckets, h.values, buf)
+      appender.addData(buf) shouldEqual Ack
+    }
+    val reader = appender.reader.asHistReader
+    for { start <- 0 until hists.length by 3; len <- Seq(1, 2, 5, 13) if start + len <= hists.length } {
+      val end = start + len - 1
+      val expected = MutableHistogram.empty(HistogramBuckets.emptyExpBuckets)
+      (start to end).foreach(i => expected.addNoCorrection(hists(i)))
+      val actual = reader.sum(start, end)
+      withClue(s"range [$start, $end]: ") {
+        actual.buckets shouldEqual expected.buckets
+        actual.values shouldEqual expected.values
+      }
+    }
+  }
+
   it("should reject initially invalid BinaryHistogram") {
     val appender = HistogramVector.appendingExp(memFactory, 1024)
 

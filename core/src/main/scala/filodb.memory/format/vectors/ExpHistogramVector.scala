@@ -156,10 +156,11 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
 
   def length(acc: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
 
-  // bug fix: use buckets.maxPositiveBuckets+1 below. Previously,
-  // we were using maxPositiveBuckets (without +1) and not accommodating zero bucket
-  private val returnHist = LongHistogram(buckets, new Array[Long](Base2ExpHistogramBuckets.maxPositiveBuckets + 1))
-  protected val dSink = NibblePack.DeltaSink(returnHist.values)
+  // Decode target, sized to the number of buckets (positive buckets + zero bucket) seen so far and grown in apply()
+  // when a histogram needs more. Avoids allocating maxPositiveBuckets + 1 longs for every reader, since a reader is
+  // created per chunk per series per query.
+  private val returnHist = LongHistogram(buckets, new Array[Long](buckets.numBuckets))
+  private var dSink = NibblePack.DeltaSink(returnHist.values)
   // Per-reader scratch state used in apply(). Readers already hold mutable state (returnHist, dSink) and are not
   // shared across threads, so these avoid ThreadLocal lookups per decoded histogram on the hot path.
   private val valuesBuf: DirectBuffer = new UnsafeBuffer(Array.empty[Byte])
@@ -185,6 +186,11 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
     bucketDef.setScheme(HistogramBuckets.otelExpScale(buf.byteArray(), binHist.bucketDefOffset),
                         HistogramBuckets.otelExpStartIndexPositiveBuckets(buf.byteArray(), binHist.bucketDefOffset),
                         HistogramBuckets.otelExpNumPositiveBuckets(buf.byteArray(), binHist.bucketDefOffset))
+    if (returnHist.values.length < bucketDef.numBuckets) {
+      val newValues = new Array[Long](bucketDef.numBuckets)
+      returnHist.values = newValues
+      dSink = NibblePack.DeltaSink(newValues)
+    }
 
     dSink.reset()
     dSink.setLength(bucketDef.numBuckets)
@@ -196,10 +202,22 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
   // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
+  // Returns a newly allocated MutableHistogram that this reader does not retain, so callers may mutate it.
   final def sum(start: Int, end: Int): MutableHistogram = {
     require(length > 0 && start >= 0 && end < length)
-    val summedHist = MutableHistogram.empty(HistogramBuckets.emptyExpBuckets)
-    cforRange { start to end } { i =>
+    val first = apply(start)
+    val summedHist = if (buckets.numPositiveBuckets > 0) {
+      // Start from a copy of the first histogram. This is what adding it to MutableHistogram.empty(emptyExpBuckets)
+      // results in (the empty scheme can't accommodate it, so addNoCorrection adopts its scheme and values), minus
+      // the intermediate allocations.
+      MutableHistogram(buckets.copy(), first.valueArray)
+    } else {
+      // zero bucket only histogram: keep the original merge semantics
+      val h = MutableHistogram.empty(HistogramBuckets.emptyExpBuckets)
+      h.addNoCorrection(first)
+      h
+    }
+    cforRange { start + 1 to end } { i =>
       summedHist.addNoCorrection(apply(i))
     }
     summedHist
