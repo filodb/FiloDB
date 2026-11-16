@@ -27,8 +27,9 @@ class VectorMinMaxTest extends NativeVectorTest {
 
   private def checkDouble(reader: DoubleVectorDataReader, vect: BinaryVectorPtr): Unit = {
     val len = reader.length(acc, vect)
-    // empty ranges
-    for { start <- 1 until len } {
+    // empty ranges, including [len, len - 1], which the chunked min/max_over_time functions produce
+    // when startRowNum == length
+    for { start <- 1 to len } {
       withClue(s"${reader.getClass.getSimpleName} empty range [$start, ${start - 1}]: ") {
         reader.min(acc, vect, start, start - 1).isNaN shouldEqual true
         reader.max(acc, vect, start, start - 1).isNaN shouldEqual true
