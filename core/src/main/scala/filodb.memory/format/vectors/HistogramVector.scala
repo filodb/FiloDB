@@ -547,7 +547,22 @@ trait HistogramReader extends VectorDataReader {
   def acc: MemoryReader
   def buckets: HistogramBuckets
   def apply(index: Int): HistogramWithBuckets
-  def sum(start: Int, end: Int): MutableHistogram
+
+  /**
+   * Sums the histograms from row start to end (inclusive) into `into`, replacing its previous contents and reusing
+   * its storage when possible.  The reader does not retain `into`.
+   */
+  def sumInto(start: Int, end: Int, into: MutableHistogram): Unit
+
+  /**
+   * Sums the histograms from row start to end (inclusive).
+   * Returns a newly allocated MutableHistogram that this reader does not retain, so callers may mutate it.
+   */
+  final def sum(start: Int, end: Int): MutableHistogram = {
+    val summedHist = MutableHistogram.reusable()
+    sumInto(start, end, summedHist)
+    summedHist
+  }
 }
 
 /**
@@ -609,13 +624,12 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
   // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
-  final def sum(start: Int, end: Int): MutableHistogram = {
+  final def sumInto(start: Int, end: Int, into: MutableHistogram): Unit = {
     require(length > 0 && start >= 0 && end < length)
-    val summedHist = MutableHistogram.empty(buckets)
+    into.setEmpty(buckets)
     cforRange { start to end } { i =>
-      summedHist.addNoCorrection(apply(i))
+      into.addNoCorrection(apply(i))
     }
-    summedHist
   }
 }
 

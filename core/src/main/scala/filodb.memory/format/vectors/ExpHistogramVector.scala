@@ -202,25 +202,22 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
   // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
-  // Returns a newly allocated MutableHistogram that this reader does not retain, so callers may mutate it.
-  final def sum(start: Int, end: Int): MutableHistogram = {
+  final def sumInto(start: Int, end: Int, into: MutableHistogram): Unit = {
     require(length > 0 && start >= 0 && end < length)
     val first = apply(start)
-    val summedHist = if (buckets.numPositiveBuckets > 0) {
-      // Start from a copy of the first histogram. This is what adding it to MutableHistogram.empty(emptyExpBuckets)
+    if (buckets.numPositiveBuckets > 0) {
+      // Start from the first histogram. This is what adding it to MutableHistogram.empty(emptyExpBuckets)
       // results in (the empty scheme can't accommodate it, so addNoCorrection adopts its scheme and values), minus
       // the intermediate allocations.
-      MutableHistogram(buckets.copy(), first.valueArray)
+      into.setFrom(first)
     } else {
       // zero bucket only histogram: keep the original merge semantics
-      val h = MutableHistogram.empty(HistogramBuckets.emptyExpBuckets)
-      h.addNoCorrection(first)
-      h
+      into.setEmpty(HistogramBuckets.emptyExpBuckets)
+      into.addNoCorrection(first)
     }
     cforRange { start + 1 to end } { i =>
-      summedHist.addNoCorrection(apply(i))
+      into.addNoCorrection(apply(i))
     }
-    summedHist
   }
 }
 

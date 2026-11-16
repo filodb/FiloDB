@@ -232,15 +232,27 @@ class ExpHistogramVectorTest extends NativeVectorTest {
       appender.addData(buf) shouldEqual Ack
     }
     val reader = appender.reader.asHistReader
+    // One accumulator reused across all ranges, as the chunked range functions do
+    val reused = MutableHistogram.reusable()
+    // Copies taken of the reused accumulator share its bucket object; they must not change when it is reused
+    val snapshots = scala.collection.mutable.ArrayBuffer.empty[(MutableHistogram, HistogramBuckets, Array[Double])]
     for { start <- 0 until hists.length by 3; len <- Seq(1, 2, 5, 13) if start + len <= hists.length } {
       val end = start + len - 1
       val expected = MutableHistogram.empty(HistogramBuckets.emptyExpBuckets)
       (start to end).foreach(i => expected.addNoCorrection(hists(i)))
       val actual = reader.sum(start, end)
+      reader.sumInto(start, end, reused)
       withClue(s"range [$start, $end]: ") {
         actual.buckets shouldEqual expected.buckets
         actual.values shouldEqual expected.values
+        reused.buckets shouldEqual expected.buckets
+        reused.values shouldEqual expected.values
       }
+      snapshots += Tuple3(reused.copy(), expected.buckets, expected.values)
+    }
+    snapshots.foreach { case (snapshot, buckets, values) =>
+      snapshot.buckets shouldEqual buckets
+      snapshot.values shouldEqual values
     }
   }
 

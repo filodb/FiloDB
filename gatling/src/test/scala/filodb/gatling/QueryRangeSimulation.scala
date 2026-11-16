@@ -59,7 +59,7 @@ trait QueryRangeSimulation extends Simulation {
     val numApps = 1
     val testDuration = 3.minutes
     // Before each run, change this to the right timestamp relevant to data stored in server
-    val startSecs = 1794711466L
+    val startSecs = 1794788336L
     // Log all HTTP requests
     val context: LoggerContext = LoggerFactory.getILoggerFactory.asInstanceOf[LoggerContext]
     context.getLogger("io.gatling").setLevel(Level.INFO)
@@ -122,8 +122,8 @@ class BinaryJoinQueryRangeSimulation extends QueryRangeSimulation {
 
 class HistogramQuantileQueryRangeSimulation extends QueryRangeSimulation {
   override val queryName = "HistogramQuantile"
-  override val promQL = """histogram_quantile(0.5, sum(rate(http_request_latency_delta{_ns_="App-0",_ws_="demo"}[5m])))"""
-  override val numUsers = 10
+  override val promQL = """histogram_quantile(0.5, sum(rate(http_request_latency_delta{_ns_="App-0",_ws_="demo"}[3m])))"""
+  override val numUsers = 15
   runLoadTest()
 }
 

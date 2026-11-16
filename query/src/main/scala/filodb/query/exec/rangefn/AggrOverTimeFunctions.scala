@@ -708,6 +708,15 @@ class SumOverTimeChunkedFunctionL extends SumOverTimeChunkedFunction() with Chun
 
 class SumOverTimeChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.empty)
 extends TimeRangeFunction[TransientHistRow] {
+  // Storage owned by this function and reused across windows, so summing a window doesn't allocate in steady state.
+  // h is either the shared Histogram.empty (nothing summed yet in this window) or windowSum.
+  // The emitted histogram is therefore overwritten by the next window: consumers must use or copy it before
+  // advancing the iterator, which they already must do for the reused sampleToEmit row.
+  private val windowSum = bv.MutableHistogram.reusable()
+  // Sum of the current chunk when a window spans chunks. It is then added to windowSum, so the floating point
+  // summation order and monotonic correction at chunk boundaries stay the same as summing each chunk separately.
+  private val chunkSum = bv.MutableHistogram.reusable()
+
   override final def reset(): Unit = { h = bv.Histogram.empty }
   final def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = {
     sampleToEmit.setValues(endTimestamp, h)
@@ -721,12 +730,12 @@ extends TimeRangeFunction[TransientHistRow] {
                                                 reader: VectorDataReader,
                                                 startRowNum: Int,
                                                 endRowNum: Int): Unit = {
-    // HistogramReader.sum always returns a newly allocated MutableHistogram that the reader does not retain,
-    // so we can take ownership of it directly without a defensive copy
-    val sum = reader.asHistReader.sum(startRowNum, endRowNum)
-    h match {
-      case hist if hist.numBuckets == 0 => h = sum
-      case hist: bv.MutableHistogram    => hist.add(sum)
+    if (h.numBuckets == 0) {
+      reader.asHistReader.sumInto(startRowNum, endRowNum, windowSum)
+      h = windowSum
+    } else {
+      reader.asHistReader.sumInto(startRowNum, endRowNum, chunkSum)
+      h.add(chunkSum)
     }
   }
 }
