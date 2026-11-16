@@ -102,6 +102,7 @@ trait FlightQueryResultStreaming extends StrictLogging {
 
   private val perReqAllocatorLimit = sysConfig.getBytes("filodb.flight.server.per-request-allocator-limit")
 
+  private val circuitBreakerEnabled = sysConfig.getBoolean("filodb.query.circuit-breaker.enabled")
   private val circuitBreakerNumFailures = sysConfig.getInt("filodb.query.circuit-breaker.open-when-num-failures")
   private val circuitBreakerResetTimeout = sysConfig.as[FiniteDuration]("filodb.query.circuit-breaker.reset-timeout")
   private val circuitBreakerExpBackOffFactor = sysConfig.getDouble("filodb.query.circuit-breaker.exp-backoff-factor")
@@ -171,7 +172,10 @@ trait FlightQueryResultStreaming extends StrictLogging {
           sendRespFooterAndComplete(listener, flightAllocator, q, querySpan,
             querySession.queryStats, Some(e))
       }
-      circuitBreaker.protect(execTask).onErrorRecover { case t =>
+      // The breaker is off unless filodb.query.circuit-breaker.enabled, as in QueryActor. Errors it
+      // would have counted (timeouts, OOM) still reach the recovery below and go back in the footer.
+      val protectedTask = if (circuitBreakerEnabled) circuitBreaker.protect(execTask) else execTask
+      protectedTask.onErrorRecover { case t =>
           // typically a logged QueryTimeout will be thrown here; all other errors are already handled above
           sendRespFooterAndComplete(listener, flightAllocator, q, querySpan, querySession.queryStats, Some(t))
         }.guarantee(Task.eval {

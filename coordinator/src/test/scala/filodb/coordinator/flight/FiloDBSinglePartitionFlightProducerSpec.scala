@@ -588,5 +588,68 @@ class FiloDBSinglePartitionFlightProducerSpec extends AnyFunSpec with Matchers w
         clientAllocator.close()
       }
     }
+
+    /**
+     * Runs `n` queries against a dedicated Flight server whose per-request allocator is too small for
+     * any query, so each one fails with an Arrow OutOfMemoryException -- an error the circuit breaker
+     * counts. The breaker opens after 2 such failures if it is enabled. Returns each query's error text.
+     */
+    def errorsFromAlwaysFailingServer(akkaPort: Int, breakerEnabled: Boolean, n: Int): Seq[String] = {
+      val serverConfig = ConfigFactory.parseString(
+        s"""filodb.flight.server.per-request-allocator-limit = 100000
+           |filodb.query.circuit-breaker.enabled = $breakerEnabled
+           |filodb.query.circuit-breaker.open-when-num-failures = 2
+           |akka.remote.netty.tcp.port = $akkaPort
+           |""".stripMargin).withFallback(config).resolve()
+      val serverLocation = Location.forGrpcInsecure("localhost",
+        FiloDBSinglePartitionFlightProducer.akkaPortToFlightPort(akkaPort))
+      val failingServer = FiloDBSinglePartitionFlightProducer.start(memStore, serverConfig)
+      val clientAllocator = FlightAllocator.newChildAllocatorForTesting(s"BreakerTest$akkaPort", 0, 3000000)
+      try {
+        (1 to n).map { _ =>
+          val clientSession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig,
+            flightAllocator = Some(new FlightAllocator(clientAllocator)))
+          try {
+            val plan = MultiSchemaPartitionsExec(QueryContext(), FlightPlanDispatcher(serverLocation, "test"),
+              timeseriesDatasetWithMetric.ref, 0, filters, chunkScanMethod,
+              timeseriesDatasetWithMetric.schema.partition.options.metricColumn)
+            plan.addRangeVectorTransformer(PeriodicSamplesMapper(0, 100, 100000, None, None))
+            plan.dispatcher.dispatch(ExecPlanWithClientParams(plan, ClientParams(60000), clientSession),
+              UnsupportedChunkSource()).runToFuture.futureValue match {
+              case QueryError(_, _, t) => s"${t.getClass.getName}: ${t.getMessage}"
+              case other => fail(s"expected a QueryError from the failing server, got $other")
+            }
+          } finally {
+            clientSession.close()
+          }
+        }
+      } finally {
+        failingServer.shutdown()
+        clientAllocator.close()
+      }
+    }
+
+    // A breaker rejection reaches the client as the ExecutionRejectedException in the response footer,
+    // which names the CircuitBreaker. The OOM itself reaches it only as gRPC's generic
+    // "There was an error servicing your request".
+    def rejectedByBreaker(error: String): Boolean = error.contains("CircuitBreaker")
+
+    it("should not reject queries with the circuit breaker when filodb.query.circuit-breaker.enabled is false") {
+      // Disabled is the default. The Flight path used to protect every query with the breaker
+      // regardless, so after 2 failures the following queries were rejected without running.
+      val errors = errorsFromAlwaysFailingServer(33819, breakerEnabled = false, n = 4)
+      withClue(errors.mkString("errors:\n", "\n", "\n")) {
+        errors.size shouldEqual 4
+        errors.filter(rejectedByBreaker) shouldBe empty
+      }
+    }
+
+    it("should reject queries with the circuit breaker once it opens when filodb.query.circuit-breaker.enabled") {
+      val errors = errorsFromAlwaysFailingServer(33821, breakerEnabled = true, n = 4)
+      withClue(errors.mkString("errors:\n", "\n", "\n")) {
+        errors.take(2).filter(rejectedByBreaker) shouldBe empty
+        errors.drop(2).exists(rejectedByBreaker) shouldBe true
+      }
+    }
   }
 }
