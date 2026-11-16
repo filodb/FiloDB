@@ -85,9 +85,8 @@ object LabelChurnFinderMain extends App with StrictLogging {
 
   // Export to Iceberg before publishing to Kafka.
   // A failed export does not block the Kafka stats.
-  // cache() lets the stats below reuse this single scan.
+  // partKeys is not cached, the export and the label stats scan it independently.
   if (dsSettings.filodbConfig.as[Boolean]("labelchurnfinder.iceberg-export.enabled")) {
-    partKeys.cache()
     val exportStartMs = System.currentTimeMillis()
     try {
       new PartKeyIcebergExporter(dsSettings.filodbConfig).exportPartKeys(spark, partKeys)
@@ -106,7 +105,6 @@ object LabelChurnFinderMain extends App with StrictLogging {
   else None
 
   labelChurnFinder.actionOnLabelStats(labelStats, producer)
-  partKeys.unpersist() // release the cache before the wait below, the partKeys are not used anymore
 
   // After the Spark job completes, read accumulator totals and record to OTel on the driver
   workspacesPublished.increment(workspacesAcc.value)
