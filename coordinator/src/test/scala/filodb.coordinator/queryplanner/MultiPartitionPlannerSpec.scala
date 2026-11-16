@@ -12,7 +12,7 @@ import filodb.coordinator.flight.PromQLFlightRemoteExec
 import filodb.core.{MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.Filter.{Equals, EqualsRegex}
-import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext, RangeParams, RoutingConfig}
+import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext, RangeParams, RoutingConfig, RvRange}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.BinaryOperator.ADD
@@ -2614,6 +2614,182 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     validatePlan(execPlan3, expectedPlanWithRemoteExportAndUncertainty)
 
 
+  }
+
+  describe("time-split aggregate pushdown") {
+    // P1 (remote) holds data for [1000s, 6999s] and P2 (local) from 7000s onwards
+    val splitPartitions = List(
+      PartitionAssignment("remote", "remote-url", TimeRange(1000 * 1000L, 6999 * 1000L), workUnit = "testWorkUnit"),
+      PartitionAssignment("local", "local-url", TimeRange(7000 * 1000L, 15000 * 1000L), workUnit = "testWorkUnit")
+    )
+    val splitLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        if (routingKey.equals(Map("job" -> "app")))
+          splitPartitions.filter(p => p.timeRange.startMs <= timeRange.endMs && p.timeRange.endMs >= timeRange.startMs)
+        else Nil
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = splitPartitions
+    }
+    val uncertaintyMs = 60000L
+    val pushdownRoutingConfig = queryConfig.routingConfig.copy(supportRemoteRawExport = true,
+      periodOfUncertaintyMs = uncertaintyMs, enableTimeSplitAggregatePushdown = true)
+
+    def planner(routingConfig: RoutingConfig): MultiPartitionPlanner =
+      new MultiPartitionPlanner(splitLocationProvider, localPlanner, "local", dataset,
+        queryConfig.copy(routingConfig = routingConfig), false)
+
+    def materialize(mpp: MultiPartitionPlanner, query: String, start: Long, step: Long, end: Long): ExecPlan = {
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start, step, end))
+      mpp.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams(query, start, step, end),
+        plannerParams = PlannerParams(processMultiPartition = true)))
+    }
+
+    def allPlans(plan: ExecPlan): Seq[ExecPlan] = plan +: (plan match {
+      case n: NonLeafExecPlan => n.children.flatMap(allPlans)
+      case _                  => Nil
+    })
+
+    def overlapMerges(plan: ExecPlan): Set[StitchOverlapMerge] =
+      allPlans(plan).collect { case s: StitchRvsExec => s.overlapMerge }.toSet
+
+    def remoteParams(plan: ExecPlan): PromQlQueryParams =
+      plan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+
+    def presenterRange(plan: ExecPlan): Option[RangeParams] =
+      plan.rangeVectorTransformers.collectFirst { case a: AggregatePresenter => a.rangeParams }
+
+    it("should push down sum(rate) to both partitions with overlapping ranges and sum the results") {
+      val query = """sum(rate(test{job="app"}[10m]))"""
+      val plan = materialize(planner(pushdownRoutingConfig), query, 1000, 100, 10000)
+
+      plan shouldBe a[StitchRvsExec]
+      val stitch = plan.asInstanceOf[StitchRvsExec]
+      stitch.overlapMerge shouldEqual StitchOverlapMerge.Sum
+      stitch.outputRvRange shouldEqual Some(RvRange(1000000, 100000, 10000000))
+      stitch.children.size shouldEqual 2
+      // no raw exports: only one StitchRvsExec in the whole tree
+      allPlans(plan).count(_.isInstanceOf[StitchRvsExec]) shouldEqual 1
+
+      // local plans first. P2 starts at split - uncertainty = 6940s, snapped to the step grid = 7000s
+      presenterRange(stitch.children.head) shouldEqual Some(RangeParams(7000, 100, 10000))
+      // P1 ends at split + lookback + uncertainty = 6999s + 600s + 60s = 7659s, snapped down to the grid = 7600s
+      val p1Params = remoteParams(stitch.children(1))
+      p1Params.promQl shouldEqual """sum(rate(test{job="app"}[600s]))"""
+      (p1Params.startSecs, p1Params.stepSecs, p1Params.endSecs) shouldEqual ((1000L, 100L, 7600L))
+    }
+
+    it("should account for offset when computing the overlapping ranges") {
+      val query = """sum(rate(test{job="app"}[10m] offset 5m))"""
+      val plan = materialize(planner(pushdownRoutingConfig), query, 1000, 100, 10000)
+      val stitch = plan.asInstanceOf[StitchRvsExec]
+      stitch.overlapMerge shouldEqual StitchOverlapMerge.Sum
+      // P2 starts at 7000s + 300s - 60s = 7240s, snapped to 7300s
+      presenterRange(stitch.children.head) shouldEqual Some(RangeParams(7300, 100, 10000))
+      // P1 ends at 6999s + 300s + 600s + 60s = 7959s, snapped down to 7900s
+      val p1Params = remoteParams(stitch.children(1))
+      (p1Params.startSecs, p1Params.endSecs) shouldEqual ((1000L, 7900L))
+    }
+
+    it("should use Max and Min merges for max(max_over_time) and min(min_over_time)") {
+      val maxPlan = materialize(planner(pushdownRoutingConfig),
+        """max(max_over_time(test{job="app"}[10m])) by (instance)""", 1000, 100, 10000)
+      maxPlan.asInstanceOf[StitchRvsExec].overlapMerge shouldEqual StitchOverlapMerge.Max
+      val minPlan = materialize(planner(pushdownRoutingConfig),
+        """min(min_over_time(test{job="app"}[10m]))""", 1000, 100, 10000)
+      minPlan.asInstanceOf[StitchRvsExec].overlapMerge shouldEqual StitchOverlapMerge.Min
+    }
+
+    it("should push down instant queries to both partitions when the instant is in the overlap") {
+      val query = """sum(increase(test{job="app"}[10m]))"""
+      val plan = materialize(planner(pushdownRoutingConfig), query, 7300, 1, 7300)
+      val stitch = plan.asInstanceOf[StitchRvsExec]
+      stitch.overlapMerge shouldEqual StitchOverlapMerge.Sum
+      stitch.children.size shouldEqual 2
+      presenterRange(stitch.children.head).map(r => (r.startSecs, r.endSecs)) shouldEqual Some((7300L, 7300L))
+      val p1Params = remoteParams(stitch.children(1))
+      (p1Params.startSecs, p1Params.endSecs) shouldEqual ((7300L, 7300L))
+    }
+
+    it("should not push down queries that cannot be decomposed across time partitions") {
+      Seq("""count(rate(test{job="app"}[10m]))""",
+          """avg(rate(test{job="app"}[10m]))""",
+          """sum(test{job="app"})""",
+          """sum(last_over_time(test{job="app"}[10m]))""",
+          """max(rate(test{job="app"}[10m]))""",
+          """sum(irate(test{job="app"}[10m]))""").foreach { query =>
+        val plan = materialize(planner(pushdownRoutingConfig), query, 1000, 100, 10000)
+        withClue(query) {
+          overlapMerges(plan) shouldEqual Set(StitchOverlapMerge.NaNOnConflict)
+        }
+      }
+    }
+
+    it("should not push down when the feature is disabled or the tenant has remote stitch disabled") {
+      val query = """sum(rate(test{job="app"}[10m]))"""
+      val disabled = materialize(planner(pushdownRoutingConfig.copy(enableTimeSplitAggregatePushdown = false)),
+        query, 1000, 100, 10000)
+      overlapMerges(disabled) shouldEqual Set(StitchOverlapMerge.NaNOnConflict)
+
+      val disabledTenant = materialize(planner(pushdownRoutingConfig.copy(stitchDisabledTenantColumn = "job",
+        tenantsWithDisabledRemoteStitch = Set("app"))), query, 1000, 100, 10000)
+      overlapMerges(disabledTenant) should not contain StitchOverlapMerge.Sum
+    }
+
+    it("should push down only for tenants on the allow list when one is configured") {
+      // "job" is the tenant column here since it is the only shard key label in these tests
+      val allowAppConfig = pushdownRoutingConfig.copy(stitchDisabledTenantColumn = "job",
+        timeSplitAggregatePushdownTenants = Set("app"))
+      val query = """sum(rate(test{job="app"}[10m]))"""
+
+      // tenant on the allow list
+      materialize(planner(allowAppConfig), query, 1000, 100, 10000)
+        .asInstanceOf[StitchRvsExec].overlapMerge shouldEqual StitchOverlapMerge.Sum
+
+      // tenant not on the allow list
+      val otherTenant = materialize(planner(allowAppConfig.copy(timeSplitAggregatePushdownTenants = Set("other"))),
+        query, 1000, 100, 10000)
+      overlapMerges(otherTenant) shouldEqual Set(StitchOverlapMerge.NaNOnConflict)
+
+      // query without an equality filter on the tenant column
+      val noTenantFilter = materialize(planner(allowAppConfig.copy(stitchDisabledTenantColumn = "_ws_",
+        timeSplitAggregatePushdownTenants = Set("app"))), query, 1000, 100, 10000)
+      overlapMerges(noTenantFilter) shouldEqual Set(StitchOverlapMerge.NaNOnConflict)
+
+      // regex filter on the tenant column does not match the allow list
+      val regexTenant = materialize(planner(allowAppConfig), """sum(rate(test{job=~"app"}[10m]))""",
+        1000, 100, 10000)
+      overlapMerges(regexTenant) should not contain StitchOverlapMerge.Sum
+
+      // the deny list still applies on top of the allow list
+      val deniedTenant = materialize(planner(allowAppConfig.copy(tenantsWithDisabledRemoteStitch = Set("app"))),
+        query, 1000, 100, 10000)
+      overlapMerges(deniedTenant) should not contain StitchOverlapMerge.Sum
+    }
+
+    it("should not push down when the eligible aggregate is only part of the query") {
+      // Eligibility is decided on the whole plan whose leaves span the split, so these use the raw export path
+      Seq("""sum(rate(test{job="app"}[10m])) + sum(rate(test{job="app"}[5m]))""",
+          """sum(rate(test{job="app"}[10m])) * 60""",
+          """abs(sum(rate(test{job="app"}[10m])))""").foreach { query =>
+        val plan = materialize(planner(pushdownRoutingConfig), query, 1000, 100, 10000)
+        withClue(query) {
+          overlapMerges(plan) should not contain StitchOverlapMerge.Sum
+        }
+      }
+    }
+
+    it("should push down regardless of the raw export limit and with raw export disabled") {
+      val query = """sum(rate(test{job="app"}[10m]))"""
+      // A raw export limit smaller than the lookback does not affect the pushdown
+      val tinyRawExportLimit = pushdownRoutingConfig.copy(
+        maxRemoteRawExportTimeRange = scala.concurrent.duration.FiniteDuration(1, "minute"))
+      materialize(planner(tinyRawExportLimit), query, 1000, 100, 10000)
+        .asInstanceOf[StitchRvsExec].overlapMerge shouldEqual StitchOverlapMerge.Sum
+      // The pushdown does not depend on enable-remote-raw-exports
+      val rawExportOff = pushdownRoutingConfig.copy(supportRemoteRawExport = false)
+      materialize(planner(rawExportOff), query, 1000, 100, 10000)
+        .asInstanceOf[StitchRvsExec].overlapMerge shouldEqual StitchOverlapMerge.Sum
+    }
   }
 
   it ("should give the correct routing keys") {

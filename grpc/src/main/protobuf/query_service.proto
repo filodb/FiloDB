@@ -931,9 +931,18 @@ message TsCardReduceExec {
   NonLeafExecPlan nonLeafExecPlan = 1;
 }
 
+// Absent/unset (NAN_ON_CONFLICT) keeps the legacy behavior for older senders
+enum StitchOverlapMerge {
+  NAN_ON_CONFLICT = 0;
+  OVERLAP_SUM     = 1;
+  OVERLAP_MAX     = 2;
+  OVERLAP_MIN     = 3;
+}
+
 message StitchRvsExec {
-  NonLeafExecPlan nonLeafExecPlan = 1;
-  optional RvRange outputRvRange  = 2;
+  NonLeafExecPlan nonLeafExecPlan       = 1;
+  optional RvRange outputRvRange        = 2;
+  StitchOverlapMerge overlapMerge       = 3;
 }
 
 message SetOperatorExec {
