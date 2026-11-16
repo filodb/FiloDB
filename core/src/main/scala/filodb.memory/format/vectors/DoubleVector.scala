@@ -150,6 +150,34 @@ trait DoubleVectorDataReader extends CounterVectorReader {
   def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double
 
   /**
+   * Minimum of the values from position start to position end (inclusive), ignoring NaN.
+   * Returns NaN if all the values are NaN, or if the range is empty (start > end).
+   * The default implementation iterates; encodings override it to avoid allocating an iterator.
+   */
+  def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    val it = iterate(acc, vector, start)
+    var min = Double.NaN
+    cforRange { start to end } { _ => min = DoubleVectorDataReader.minOf(min, it.next) }
+    min
+  }
+
+  /**
+   * Maximum of the values from position start to position end (inclusive), ignoring NaN.
+   * Returns NaN if all the values are NaN, or if the range is empty (start > end).
+   * The default implementation iterates; encodings override it to avoid allocating an iterator.
+   */
+  def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    val it = iterate(acc, vector, start)
+    var max = Double.NaN
+    cforRange { start to end } { _ => max = DoubleVectorDataReader.maxOf(max, it.next) }
+    max
+  }
+
+  /**
    * Counts the values excluding NaN / not available bits
    */
   def count(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int
@@ -214,6 +242,19 @@ trait DoubleVectorDataReader extends CounterVectorReader {
  * VectorDataReader for a Double BinaryVector using full 64-bits for a Double value
  * Right now this is for non-corrected ingested vectors.
  */
+object DoubleVectorDataReader {
+  /**
+   * One step of a NaN-ignoring running min: NaN values are skipped, and a NaN running min (nothing seen yet) is
+   * replaced. Equal values replace the running min, so of equal values (eg 0.0 and -0.0) the last one wins.
+   */
+  @inline final def minOf(runningMin: Double, value: Double): Double =
+    if (runningMin != runningMin || value <= runningMin) value else runningMin
+
+  /** NaN-ignoring running max; see minOf */
+  @inline final def maxOf(runningMax: Double, value: Double): Double =
+    if (runningMax != runningMax || value >= runningMax) value else runningMax
+}
+
 object DoubleVectorDataReader64 extends DoubleVectorDataReader {
   import PrimitiveVector.OffsetData
 
@@ -229,6 +270,34 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     acc.getDouble(vector + OffsetData + n * 8)
   def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new Double64Iterator(acc, vector + OffsetData + startElement * 8)
+
+  // end is inclusive
+  final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    var addr = vector + OffsetData + start * 8
+    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
+    var min = Double.NaN
+    while (addr < untilAddr) {
+      min = DoubleVectorDataReader.minOf(min, acc.getDouble(addr))
+      addr += 8
+    }
+    min
+  }
+
+  // end is inclusive
+  final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(acc, vector)}")
+    var addr = vector + OffsetData + start * 8
+    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
+    var max = Double.NaN
+    while (addr < untilAddr) {
+      max = DoubleVectorDataReader.maxOf(max, acc.getDouble(addr))
+      addr += 8
+    }
+    max
+  }
 
   // end is inclusive
   final def sum(acc: MemoryReader, vector: BinaryVectorPtr,
@@ -313,6 +382,10 @@ extends DoubleVectorDataReader {
     inner.iterate(acc2, vector, startElement)
   def sum(acc2: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     inner.sum(acc2, vector, start, end, ignoreNaN)
+  override def min(acc2: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    inner.min(acc2, vector, start, end)
+  override def max(acc2: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    inner.max(acc2, vector, start, end)
   def count(acc2: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int =
     inner.count(acc2, vector, start, end)
   def changes(acc2: MemoryReader, vector: BinaryVectorPtr,
@@ -404,6 +477,12 @@ object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVect
 
   final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     DoubleVector(acc, subvectAddr(acc, vector)).sum(acc, subvectAddr(acc, vector), start, end, ignoreNaN)
+
+  final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    DoubleVector(acc, subvectAddr(acc, vector)).min(acc, subvectAddr(acc, vector), start, end)
+
+  final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    DoubleVector(acc, subvectAddr(acc, vector)).max(acc, subvectAddr(acc, vector), start, end)
 
   final def count(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int =
     DoubleVector(acc, subvectAddr(acc, vector)).count(acc, subvectAddr(acc, vector), start, end)
@@ -552,6 +631,11 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
     LongBinaryVector(acc, vector)(acc, vector, n).toDouble
   final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     LongBinaryVector(acc, vector).sum(acc, vector, start, end)   // Long vectors cannot contain NaN, ignore it
+  // Long vectors cannot contain NaN. The long min/max require a non-empty range, so handle an empty one here.
+  final override def min(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    if (start > end) Double.NaN else LongBinaryVector(acc, vector).min(acc, vector, start, end).toDouble
+  final override def max(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    if (start > end) Double.NaN else LongBinaryVector(acc, vector).max(acc, vector, start, end).toDouble
   final def count(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int = end - start + 1
   final def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new DoubleLongWrapIterator(LongBinaryVector(acc, vector).iterate(acc, vector, startElement))

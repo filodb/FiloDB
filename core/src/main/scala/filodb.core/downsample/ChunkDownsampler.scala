@@ -1,7 +1,5 @@
 package filodb.core.downsample
 
-import java.lang.{Double => JLDouble}
-
 import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.metadata.Column.ColumnType
@@ -180,19 +178,11 @@ case class MinDownsampler(override val inputColIds: Seq[Int]) extends DoubleChun
                                chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    // TODO MinOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
     val vecAcc = chunkset.vectorAccessor(inputColIds(0))
     val vecPtr = chunkset.vectorAddress(inputColIds(0))
-    val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr)
-    var min = Double.MaxValue
-    var rowNum = startRow
-    val it = colReader.iterate(vecAcc, vecPtr, startRow).asDoubleIt
-    while (rowNum <= endRow) {
-      val nextVal = it.next
-      if (!JLDouble.isNaN(nextVal)) min = Math.min(min, nextVal)
-      rowNum += 1
-    }
-    min
+    val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr).asDoubleReader
+    // NaN values are ignored.
+    colReader.min(vecAcc, vecPtr, startRow, endRow)
   }
 }
 
@@ -241,19 +231,11 @@ case class MaxDownsampler(override val inputColIds: Seq[Int]) extends DoubleChun
                                chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    // TODO MaxOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
     val vecAcc = chunkset.vectorAccessor(inputColIds(0))
     val vecPtr = chunkset.vectorAddress(inputColIds(0))
-    val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr)
-    var max = Double.MinValue
-    var rowNum = startRow
-    val it = colReader.iterate(vecAcc, vecPtr, startRow).asDoubleIt
-    while (rowNum <= endRow) {
-      val nextVal = it.next
-      if (!JLDouble.isNaN(nextVal)) max = Math.max(max, nextVal)
-      rowNum += 1
-    }
-    max
+    val colReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr).asDoubleReader
+    // NaN values are ignored.
+    colReader.max(vecAcc, vecPtr, startRow, endRow)
   }
 }
 
