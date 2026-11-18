@@ -187,7 +187,10 @@ object Dependencies {
     "org.rogach" %% "scallop"        % "3.3.0", // Updated for Scala 2.13
     "com.google.protobuf" % "protobuf-java" % "2.5.0",
     "org.xerial.snappy" % "snappy-java" % "1.1.8.4",
-    akkaHttp
+    akkaHttp,
+    scalaTest            % "it",
+    "org.testcontainers" % "testcontainers" % "1.19.8" % "it",
+    "org.testcontainers" % "kafka"          % "1.19.8" % "it"
   )
 
   lazy val httpDeps = Seq(
