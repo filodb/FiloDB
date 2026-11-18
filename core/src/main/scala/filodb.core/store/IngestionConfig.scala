@@ -40,7 +40,16 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              estimatedIngestResolutionMillis: Int,
                              // Zeroes memory when it is first allocated.
                              // NOTE: this will incur a memset(); memory will be eagerly allocated if enabled.
-                             clearAllocations: Boolean) {
+                             clearAllocations: Boolean,
+                             // Whether the partkeysbyupdatetime (PkUT) table is updated on part key flush.
+                             // The PkUT table is only consumed by the downsampler's DSIndexJob, so this can be
+                             // set false to avoid wasted writes when downsampling is disabled.
+                             writeToPkUTTable: Boolean = true,
+                             // Whether the ingestion_time_index (write-time index) table is written on chunk flush.
+                             // This raw index is what the downsample Spark job queries (getChunksByIngestionTimeRange)
+                             // to find chunks to downsample, so it is only safe to set false when downsampling does not
+                             // consume it (same rationale as write-to-pk-ut-table).
+                             writeToIngestionTimeIndex: Boolean = true) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -65,7 +74,9 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "metering-enabled" -> meteringEnabled,
                                "accept-duplicate-samples" -> acceptDuplicateSamples,
                                "ingest-resolution-millis" -> estimatedIngestResolutionMillis,
-                               "clear-allocations" -> clearAllocations).asJava)
+                               "clear-allocations" -> clearAllocations,
+                               "write-to-pk-ut-table" -> writeToPkUTTable,
+                               "write-to-ingestion-time-index" -> writeToIngestionTimeIndex).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -104,6 +115,8 @@ object StoreConfig {
                                            |time-aligned-chunks-enabled = false
                                            |ingest-resolution-millis = 60000
                                            |clear-allocations = false
+                                           |write-to-pk-ut-table = true
+                                           |write-to-ingestion-time-index = true
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -144,7 +157,9 @@ object StoreConfig {
                 config.getBoolean("metering-enabled"),
                 config.getBoolean("accept-duplicate-samples"),
                 config.getInt("ingest-resolution-millis"),
-                config.getBoolean("clear-allocations"))
+                config.getBoolean("clear-allocations"),
+                config.getBoolean("write-to-pk-ut-table"),
+                config.getBoolean("write-to-ingestion-time-index"))
   }
 }
 

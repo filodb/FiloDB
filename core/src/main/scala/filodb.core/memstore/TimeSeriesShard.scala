@@ -1622,7 +1622,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     colStore.writePartKeys(ref, shardNum,
       Observable.fromIteratorUnsafe(partKeyRecords),
-      storeConfig.diskTTLSeconds, updateHour).map { resp =>
+      storeConfig.diskTTLSeconds, updateHour, storeConfig.writeToPkUTTable).map { resp =>
       if (flushGroup.dirtyPartsToFlush.length > 0) {
         logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
           s" resp=$resp for dataset=$ref shard=$shardNum")
@@ -1647,7 +1647,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in " +
       s"dataset=$ref shard=$shardNum")
 
-    colStore.write(ref, chunkSetStream, storeConfig.diskTTLSeconds).recover { case e =>
+    colStore.write(ref, chunkSetStream, storeConfig.diskTTLSeconds,
+      storeConfig.writeToIngestionTimeIndex).recover { case e =>
       logger.error(s"Critical! Chunk persistence failed after retries and skipped in dataset=$ref " +
         s"shard=$shardNum", e)
       shardStats.flushesFailedChunkWrite.increment()
