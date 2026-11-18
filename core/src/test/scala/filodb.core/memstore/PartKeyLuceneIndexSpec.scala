@@ -190,6 +190,25 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       Set("_ws_", "_ns_", "_metric_", "_type_", "instance")
   }
 
+  it("should index the labels of part keys whose tags are larger than 32KB") {
+    val index = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
+      true, true, 0, 1.hour.toMillis)
+    val shardKeyTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
+    // 40 labels of 1 + 12 + 2 + 1000 bytes each make tags of about 40KB, within the 64KB a map can hold
+    val bigTags = shardKeyTags ++ (0 until 40).map(i => f"big_label_$i%02d".utf8 -> ("x" * 1000).utf8)
+
+    Seq(shardKeyTags, bigTags).zipWithIndex.foreach { case (tags, partId) =>
+      val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, "counter", tags)
+      index.addPartKey(partKeyOnHeap(Schemas.promCounter.partition.binSchema, ZeroPointer, partKey), partId, 5)()
+    }
+    index.refreshReadersBlocking()
+
+    val shardKeyFilters = Seq(ColumnFilter("_ws_", Equals("my_ws")), ColumnFilter("_ns_", Equals("my_ns")))
+    index.partIdsFromFilters(shardKeyFilters, 0, Long.MaxValue).toIterable() should contain theSameElementsAs List(0, 1)
+    index.partIdsFromFilters(Seq(ColumnFilter("big_label_39", Equals("x" * 1000))), 0, Long.MaxValue)
+      .toIterable() should contain theSameElementsAs List(1)
+  }
+
   it("should be able to do regular operations when faceting is disabled and additional faceting in dataset") {
     val facetIndex = new PartKeyLuceneIndex(dataset7.ref, dataset7.schema.partition,
       false, true, 0, 1.hour.toMillis)
