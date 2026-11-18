@@ -54,3 +54,45 @@ jobs:
       with:
         name: scoverage-report
         path: target/scala-*/scoverage-report/**
+
+  prom-compat-integration:
+    # Runs the FiloDB-vs-Prometheus PromQL compatibility harness (http/src/it, the sbt
+    # IntegrationTest config). `http/it:test` runs PromCompatSpec against a live Prometheus that
+    # this job starts, plus the harness support-class unit specs. PromCompatSpec self-cancels via
+    # assume() if Prometheus is unreachable, so it never hard-fails a run without one.
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Set up JDK 21
+      uses: actions/setup-java@v2
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+    - name: Cache SBT dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.ivy2/cache
+          ~/.sbt/boot
+          ~/.sbt/launchers
+          ~/.coursier/cache
+        key: ${{ runner.os }}-sbt-${{ hashFiles('**/build.sbt', '**/project/Dependencies.scala', '**/project/plugins.sbt', '**/project/build.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-sbt-
+    - name: Install Rust Toolchain
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        components: rustfmt, clippy
+        target: x86_64-apple-darwin, aarch64-apple-darwin, aarch64-unknown-linux-gnu
+        cache-workspaces: "core/src/rust -> target"
+        toolchain: 1.83.0
+    - name: Install cargo-zigbuild
+      run: pip install cargo-zigbuild
+    - name: Run Prometheus compatibility test
+      # Starts prom/prometheus with the remote-write receiver, waits for readiness,
+      # runs the tagged spec, and removes the container on exit.
+      env:
+        SBT_OPTS: "-Dsbt.coursier.parallel-download-count=3"
+      run: scripts/run_prom_compat.sh
