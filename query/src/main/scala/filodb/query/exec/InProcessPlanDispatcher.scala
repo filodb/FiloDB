@@ -48,7 +48,16 @@ case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatc
       plan.execPlan.execute(source, querySession)
         .timeout(plan.clientParams.deadlineMs.milliseconds)
         // skip closing flight allocator since it is owned by caller and simply passed down
-        .guarantee(Task.eval(querySession.close(skipAllocatorClose = true)))
+        .guarantee(Task.eval {
+          if (querySession.preventRangeVectorSerialization) {
+            // The result RVs were not serialized: they are lazy and read block memory when the caller
+            // iterates them (e.g. in the parent's compose), which happens after this task completes.
+            // Hand the eviction locks to the caller's session so they stay held until it closes.
+            querySession.closeAndTransferLocks(plan.querySession, skipAllocatorClose = true)
+          } else {
+            querySession.close(skipAllocatorClose = true)
+          }
+        })
         .onErrorRecoverWith {
         case e: TimeoutException =>
          qLogger.error(s"TimeoutException for query id: ${plan.execPlan.queryContext.queryId}: ${e.getMessage}")
