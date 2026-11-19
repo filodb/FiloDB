@@ -489,6 +489,42 @@ final case class MutableHistogram(var buckets: HistogramBuckets,
   }
 
   /**
+   * Makes this histogram equal to other (same bucket scheme and values), reusing this histogram's storage when
+   * the number of buckets is unchanged. Unlike populateFrom, the bucket schemes need not match.
+   * Used to keep one long lived accumulator instead of allocating a new histogram for each window or step.
+   */
+  final def setFrom(other: HistogramWithBuckets): Unit = {
+    adoptBuckets(other.buckets)
+    val n = numBuckets
+    other match {
+      case m: MutableHistogram => System.arraycopy(m.values, 0, values, 0, n)
+      case _                   => cforRange { 0 until n } { b => values(b) = other.bucketValue(b) }
+    }
+  }
+
+  /**
+   * Makes this histogram equal to MutableHistogram.empty(newBuckets), reusing storage where possible.
+   */
+  final def setEmpty(newBuckets: HistogramBuckets): Unit = {
+    adoptBuckets(newBuckets)
+    java.util.Arrays.fill(values, Double.NaN)
+  }
+
+  /**
+   * Switches to the newBuckets scheme and sizes values to match; values content is unspecified afterwards.
+   * Bucket objects are never mutated in place here, since they may be shared with other histograms (for example
+   * through copy()). Base2ExpHistogramBuckets are mutable and readers update theirs for every sample, so they are
+   * copied instead of aliased, but only when the scheme actually changes.
+   */
+  private def adoptBuckets(newBuckets: HistogramBuckets): Unit = {
+    newBuckets match {
+      case nb: Base2ExpHistogramBuckets => if (!nb.similarForMath(buckets)) buckets = nb.copy()
+      case nb                           => buckets = nb
+    }
+    if (values.length != buckets.numBuckets) values = new Array[Double](buckets.numBuckets)
+  }
+
+  /**
    * Adds the values from another Histogram.
    * If the other histogram has the same bucket scheme, then the values are just added per bucket.
    * If the scheme is different, it assigns NaN to values.
@@ -520,7 +556,7 @@ final case class MutableHistogram(var buckets: HistogramBuckets,
       } else if (ourBuckets.numPositiveBuckets == 0) { // zero-only
         buckets = otherBuckets.copy() // just use the other buckets
         val thisValues = values
-        values = other.valueArray.clone()
+        values = other.valueArray // valueArray already returns a freshly allocated array, no need to clone
         values(0) += thisValues(0)
         false
       } else if (otherBuckets.numPositiveBuckets == 0) { // zero-only
@@ -584,8 +620,18 @@ final case class MutableHistogram(var buckets: HistogramBuckets,
 }
 
 object MutableHistogram {
-  def empty(buckets: HistogramBuckets): MutableHistogram =
-    MutableHistogram(buckets, Array.fill(buckets.numBuckets)(Double.NaN))
+  /**
+   * A new zero bucket histogram meant to be filled with setFrom / setEmpty / HistogramReader.sumInto.
+   * Unlike Histogram.empty, it is not shared, so it is safe to mutate.
+   */
+  def reusable(): MutableHistogram = MutableHistogram(HistogramBuckets.emptyBuckets, new Array[Double](0))
+
+  def empty(buckets: HistogramBuckets): MutableHistogram = {
+    // Avoid scala.Array.fill: it evaluates a by-name Function0 per element and boxes each Double
+    val values = new Array[Double](buckets.numBuckets)
+    java.util.Arrays.fill(values, Double.NaN)
+    MutableHistogram(buckets, values)
+  }
 
   def fromPacked(bucketDef: HistogramBuckets, packedValues: DirectBuffer): Option[MutableHistogram] = {
     val values = new Array[Double](bucketDef.numBuckets)

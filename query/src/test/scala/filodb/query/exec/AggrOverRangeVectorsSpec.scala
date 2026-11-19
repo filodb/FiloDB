@@ -680,7 +680,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       h1
     }.toList
 
-    result(0).rows().map(_.getHistogram(1)).toList shouldEqual sums
+    // Copy each histogram: result rows reuse their histogram storage, so it must not be held past next()
+    result(0).rows().map(_.getHistogram(1).asInstanceOf[bv.MutableHistogram].copy()).toList shouldEqual sums
 
     // Test mapReduce of empty histogram sums
     val agg2 = RowAggregator(AggregationOperator.Sum, Nil, histSchema)
@@ -765,7 +766,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       Math.max(row1(5).asInstanceOf[Double], row2(5).asInstanceOf[Double])
     }.toList
 
-    val answers = result(0).rows().map(r => (r.getHistogram(1), r.getDouble(2))).toList
+    // Copy each histogram: result rows reuse their histogram storage, so it must not be held past next()
+    val answers = result(0).rows()
+      .map(r => (r.getHistogram(1).asInstanceOf[bv.MutableHistogram].copy(), r.getDouble(2))).toList
     answers.map(_._1) shouldEqual sums
     answers.map(_._2) shouldEqual maxes
   }
@@ -835,7 +838,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val res = Seq.fill(8)(Double.NaN)
     // Since bucket size is different value should be NaN
     sums.foreach( s => compareIter(s.values.toIterator, res.toIterator))
-    result(0).rows().map(_.getHistogram(1)).toList shouldEqual sums
+    // Copy each histogram: result rows reuse their histogram storage, so it must not be held past next()
+    result(0).rows().map(_.getHistogram(1).asInstanceOf[bv.MutableHistogram].copy()).toList shouldEqual sums
 
   }
 

@@ -1125,7 +1125,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val slidingIt = slidingWindowItH(data, rv1, new SumOverTimeFunctionH(), windowSize, step)
     // Test chunked function
     val chunkedIt = chunkedWindowItHist(data, rv2, new SumOverTimeChunkedFunctionH(), windowSize, step)
-    val chunkedResults = chunkedIt.map(_.getHistogram(1)).toList
+    // Copy each histogram: the chunked function reuses its histogram storage across windows
+    val chunkedResults = chunkedIt.map(_.getHistogram(1).asInstanceOf[bv.MutableHistogram].copy()).toList
     // Results should be identical
     slidingIt.zip(chunkedResults.iterator).foreach { case (sliding, chunked) =>
       sliding.getHistogram(1) shouldEqual chunked

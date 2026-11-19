@@ -14,6 +14,15 @@ object HistMaxMinSumAggregator extends RowAggregator {
     val row = new TransientHistMaxMinRow()
     def toRowReader: MutableRowReader = { row.setValues(timestamp, h); row.max = max; row.min = min; row }
     def resetToZero(): Unit = { h = bv.Histogram.empty; max = Double.NaN; min = Double.NaN }
+    // Storage owned by this holder and reused across steps, so starting a new sum doesn't allocate in steady state.
+    // h is either the shared Histogram.empty or ownedHist. The result is overwritten when the holder is reused
+    // for the next step, so consumers must use or copy it before advancing, as with the reused row.
+    private var ownedHist: bv.MutableHistogram = _
+    def startSum(first: bv.HistogramWithBuckets): Unit = {
+      if (ownedHist == null) ownedHist = bv.MutableHistogram.reusable()
+      ownedHist.setFrom(first)
+      h = ownedHist
+    }
   }
   type AggHolderType = HistSumMaxMinHolder
   def zero: HistSumMaxMinHolder = new HistSumMaxMinHolder
@@ -23,8 +32,8 @@ object HistMaxMinSumAggregator extends RowAggregator {
     acc.timestamp = aggRes.getLong(0)
     val newHist = aggRes.getHistogram(1)
     acc.h match {
-      // sum is mutable histogram, copy to be sure it's our own copy
-      case hist if hist.numBuckets == 0 => acc.h = bv.MutableHistogram(newHist)
+      // copy into the holder's own storage, since newHist may be reused by its producer
+      case hist if hist.numBuckets == 0 => acc.startSum(newHist.asInstanceOf[bv.HistogramWithBuckets])
       case h if newHist.numBuckets > 0  => acc.h.add(newHist.asInstanceOf[bv.HistogramWithBuckets])
       case h                            =>
     }

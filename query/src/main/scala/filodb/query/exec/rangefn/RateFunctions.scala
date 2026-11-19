@@ -540,13 +540,21 @@ class RateOverDeltaChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.em
   override final def reset(): Unit = hFunc.reset()
 
   override def apply(schema: Schema, windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistRow): Unit = {
-    val rateArray = new Array[Double](hFunc.h.numBuckets)
-    cforRange {
-      0 until rateArray.size
-    } { b =>
-      rateArray(b) = hFunc.h.bucketValue(b) / (windowEnd - windowStart) * 1000
+    val summed = hFunc.h
+    if (summed.numBuckets == 0) {
+      // Nothing summed in this window; summed may be the shared Histogram.empty, so never mutate or emit it
+      sampleToEmit.setValues(windowEnd, bv.MutableHistogram(summed.buckets, new Array[Double](0)))
+    } else {
+      // summed is owned exclusively by hFunc for this window (it is replaced on reset() before the next window),
+      // so convert it to a rate in place and emit it instead of allocating a new histogram per window
+      val values = summed.values
+      cforRange {
+        0 until summed.numBuckets
+      } { b =>
+        values(b) = values(b) / (windowEnd - windowStart) * 1000
+      }
+      sampleToEmit.setValues(windowEnd, summed)
     }
-    sampleToEmit.setValues(windowEnd, bv.MutableHistogram(hFunc.h.buckets, rateArray))
   }
 
   final def addTimeChunksWithTimestamp(tsVectorAcc: MemoryReader,

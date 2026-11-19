@@ -357,11 +357,20 @@ object NibblePack {
    *                   to unpack.  NOTE: the passed in DirectBuffer will be mutated to wrap the NEXT bytes that
    *                   can be unpacked.
    */
-  final def unpackToSink(compressed: DirectBuffer, sink: Sink, numValues: Int): UnpackResult = {
+  final def unpackToSink(compressed: DirectBuffer, sink: Sink, numValues: Int): UnpackResult =
+    unpackToSink(compressed, sink, numValues, tempArray)
+
+  /**
+   * Same as above, but uses the caller supplied scratch array of at least 8 Longs instead of the
+   * thread local one. Hot path callers that unpack many histograms should hold their own scratch
+   * array to avoid a ThreadLocal lookup on every call.
+   */
+  final def unpackToSink(compressed: DirectBuffer, sink: Sink, numValues: Int,
+                         scratch: Array[Long]): UnpackResult = {
     var res: UnpackResult = Ok
     var valuesLeft = numValues
     while (valuesLeft > 0 && res == Ok && compressed.capacity > 0) {
-      res = unpack8(compressed, sink)
+      res = unpack8(compressed, sink, scratch)
       valuesLeft -= 8
     }
     res
@@ -391,8 +400,14 @@ object NibblePack {
    * @param sink a Sink for processing output values.  8 Longs will be passed to it.
    * @return an UnpackResult
    */
+  final def unpack8(compressed: DirectBuffer, sink: Sink): UnpackResult = unpack8(compressed, sink, tempArray)
+
+  /**
+   * Same as above, but writes into the caller supplied scratch array of at least 8 Longs before passing it
+   * to the sink.
+   */
   //scalastyle:off method.length
-  final def unpack8(compressed: DirectBuffer, sink: Sink): UnpackResult = {
+  final def unpack8(compressed: DirectBuffer, sink: Sink, scratch: Array[Long]): UnpackResult = {
     val nonzeroMask = compressed.getByte(0)
     if (nonzeroMask == 0) {
       sink.process(zeroOutput)
@@ -406,7 +421,7 @@ object NibblePack {
       val mask = if (numBits >= 64) -1L else (1L << numBits) - 1
       var bufIndex = 2
       var bitCursor = 0
-      val outArray = tempArray
+      val outArray = scratch
 
       var inWord = readLong(compressed, bufIndex)
       bufIndex += 8

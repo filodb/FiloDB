@@ -84,9 +84,22 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
   final val numBuckets = 160
   val spread = 3
 
+  /** Polls `cond` every 100ms until it holds, failing with `what` if `timeout` elapses first. */
+  private def awaitCondition(what: String, timeout: FiniteDuration)(cond: => Boolean): Unit = {
+    val deadline = timeout.fromNow
+    while (!cond) {
+      if (deadline.isOverdue()) throw new IllegalStateException(s"Timed out after $timeout waiting for $what")
+      Thread sleep 100
+    }
+  }
+
+  // SetupDataset is processed asynchronously by the coordinator's IngestionActor, which creates the memstore
+  // shards.  Wait until all of them exist before starting ingestion instead of guessing with a fixed sleep.
+  awaitCondition(s"$numShards shards to be set up", 60.seconds) {
+    cluster.memStore.activeShards(dataset.ref).size == numShards
+  }
+
   // Manually pump in data ourselves so we know when it's done.
-  // TODO: ingest into multiple shards
-  Thread sleep 2000    // Give setup command some time to set up dataset shards etc.
   val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(startTime, numShards, numSeries,
     numMetricNames = 1, numSamplesPerTs * numSeries, dataset, shardMapper, spread,
     publishIntervalSec = 10, numBuckets = numBuckets, expHist = true)
@@ -103,7 +116,12 @@ class Base2ExponentialHistogramQueryBenchmark extends StrictLogging {
       Task.fromFuture(cluster.memStore.startIngestion(dataset.ref, shard, shardStream, global))
     }.countL.runToFuture
   Await.result(producingFut, 90.seconds)
-  Thread sleep 20000 // Wait for ingestion to finish
+  // The container stream never completes (the gateway sharding queues stay open), so ingestTask can't be awaited.
+  // Instead wait until the memstore has ingested every generated sample.
+  val expectedRows = numSamplesPerTs.toLong * numSeries
+  awaitCondition(s"$expectedRows rows to be ingested", 120.seconds) {
+    cluster.memStore.numRowsIngested(dataset.ref) >= expectedRows
+  }
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 

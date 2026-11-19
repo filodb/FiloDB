@@ -547,7 +547,22 @@ trait HistogramReader extends VectorDataReader {
   def acc: MemoryReader
   def buckets: HistogramBuckets
   def apply(index: Int): HistogramWithBuckets
-  def sum(start: Int, end: Int): MutableHistogram
+
+  /**
+   * Sums the histograms from row start to end (inclusive) into `into`, replacing its previous contents and reusing
+   * its storage when possible.  The reader does not retain `into`.
+   */
+  def sumInto(start: Int, end: Int, into: MutableHistogram): Unit
+
+  /**
+   * Sums the histograms from row start to end (inclusive).
+   * Returns a newly allocated MutableHistogram that this reader does not retain, so callers may mutate it.
+   */
+  final def sum(start: Int, end: Int): MutableHistogram = {
+    val summedHist = MutableHistogram.reusable()
+    sumInto(start, end, summedHist)
+    summedHist
+  }
 }
 
 /**
@@ -590,28 +605,31 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
   def length(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
 
   protected val dSink = NibblePack.DeltaSink(returnHist.values)
+  // Per-reader scratch state. Readers already hold mutable state (returnHist, dSink) and are not shared across
+  // threads, so these avoid ThreadLocal lookups per decoded histogram on the hot path.
+  protected val valuesBuf: DirectBuffer = new UnsafeBuffer(Array.empty[Byte])
+  protected val unpackScratch = new Array[Long](8)
 
   // WARNING: histogram returned is shared between calls, do not reuse!
   def apply(index: Int): HistogramWithBuckets = {
     require(length > 0)
     val histPtr = locate(index)
     val histLen = histPtr.asU16.getU16(acc)
-    val buf = BinaryHistogram.valuesBuf
+    val buf = valuesBuf
     acc.wrapInto(buf, histPtr.add(2).addr, histLen)
     dSink.reset()
-    NibblePack.unpackToSink(buf, dSink, numBuckets)
+    NibblePack.unpackToSink(buf, dSink, numBuckets, unpackScratch)
     returnHist
   }
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
   // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
-  final def sum(start: Int, end: Int): MutableHistogram = {
+  final def sumInto(start: Int, end: Int, into: MutableHistogram): Unit = {
     require(length > 0 && start >= 0 && end < length)
-    val summedHist = MutableHistogram.empty(buckets)
+    into.setEmpty(buckets)
     cforRange { start to end } { i =>
-      summedHist.addNoCorrection(apply(i))
+      into.addNoCorrection(apply(i))
     }
-    summedHist
   }
 }
 
@@ -637,9 +655,9 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
     super.setSection(sectAddr, newElemNo)
     // unpack to baseHist
     baseSink.reset()
-    val buf = BinaryHistogram.valuesBuf
+    val buf = valuesBuf
     acc.wrapInto(buf, curHist.add(2).addr, curHist.asU16.getU16(acc))
-    NibblePack.unpackToSink(buf, baseSink, numBuckets)
+    NibblePack.unpackToSink(buf, baseSink, numBuckets, unpackScratch)
   }
 
   override def apply(index: Int): HistogramWithBuckets = {
@@ -653,10 +671,10 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
     if (index == sectStartingElemNo) baseHist
     else {
       val histLen = histPtr.asU16.getU16(acc)
-      val buf = BinaryHistogram.valuesBuf
+      val buf = valuesBuf
       acc.wrapInto(buf, histPtr.add(2).addr, histLen)
       dSink.reset()
-      NibblePack.unpackToSink(buf, dSink, numBuckets)
+      NibblePack.unpackToSink(buf, dSink, numBuckets, unpackScratch)
 
       summedHist.populateFrom(baseHist)
       summedHist.add(returnHist)

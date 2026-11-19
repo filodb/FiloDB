@@ -2,6 +2,7 @@ package filodb.memory.format.vectors
 
 import debox.Buffer
 import org.agrona.DirectBuffer
+import org.agrona.concurrent.UnsafeBuffer
 import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
@@ -155,10 +156,15 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
 
   def length(acc: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
 
-  // bug fix: use buckets.maxPositiveBuckets+1 below. Previously,
-  // we were using maxPositiveBuckets (without +1) and not accommodating zero bucket
-  private val returnHist = LongHistogram(buckets, new Array[Long](Base2ExpHistogramBuckets.maxPositiveBuckets + 1))
-  protected val dSink = NibblePack.DeltaSink(returnHist.values)
+  // Decode target, sized to the number of buckets (positive buckets + zero bucket) seen so far and grown in apply()
+  // when a histogram needs more. Avoids allocating maxPositiveBuckets + 1 longs for every reader, since a reader is
+  // created per chunk per series per query.
+  private val returnHist = LongHistogram(buckets, new Array[Long](buckets.numBuckets))
+  private var dSink = NibblePack.DeltaSink(returnHist.values)
+  // Per-reader scratch state used in apply(). Readers already hold mutable state (returnHist, dSink) and are not
+  // shared across threads, so these avoid ThreadLocal lookups per decoded histogram on the hot path.
+  private val valuesBuf: DirectBuffer = new UnsafeBuffer(Array.empty[Byte])
+  private val unpackScratch = new Array[Long](8)
 
   /**
    * Returns a histogram for the given index.  The histogram is a shared instance and should not be modified.
@@ -172,7 +178,7 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
     require(length > 0)
     val histPtr = locate(index)
     val histLen = histPtr.asU16.getU16(acc)
-    val buf = BinaryHistogram.valuesBuf
+    val buf = valuesBuf
     acc.wrapInto(buf, histPtr.add(2).addr, histLen)
 
     val binHist = BinaryHistogram.BinHistogram(buf)
@@ -180,23 +186,38 @@ class RowExpHistogramReader(val acc: MemoryReader, val histVect: Ptr.U8) extends
     bucketDef.setScheme(HistogramBuckets.otelExpScale(buf.byteArray(), binHist.bucketDefOffset),
                         HistogramBuckets.otelExpStartIndexPositiveBuckets(buf.byteArray(), binHist.bucketDefOffset),
                         HistogramBuckets.otelExpNumPositiveBuckets(buf.byteArray(), binHist.bucketDefOffset))
+    if (returnHist.values.length < bucketDef.numBuckets) {
+      val newValues = new Array[Long](bucketDef.numBuckets)
+      returnHist.values = newValues
+      dSink = NibblePack.DeltaSink(newValues)
+    }
 
     dSink.reset()
     dSink.setLength(bucketDef.numBuckets)
-    val buf2 = binHist.valuesByteSlice // no object allocation here, valuesBuf is reused
-    NibblePack.unpackToSink(buf2, dSink, bucketDef.numBuckets)
+    // Same as binHist.valuesByteSlice, but re-wraps our own buffer instead of the thread local one
+    UnsafeUtils.wrapDirectBuf(buf.byteArray, buf.addressOffset + binHist.valuesIndex, binHist.valuesNumBytes, buf)
+    NibblePack.unpackToSink(buf, dSink, bucketDef.numBuckets, unpackScratch)
     returnHist
   }
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
   // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
-  final def sum(start: Int, end: Int): MutableHistogram = {
+  final def sumInto(start: Int, end: Int, into: MutableHistogram): Unit = {
     require(length > 0 && start >= 0 && end < length)
-    val summedHist = MutableHistogram.empty(HistogramBuckets.emptyExpBuckets)
-    cforRange { start to end } { i =>
-      summedHist.addNoCorrection(apply(i))
+    val first = apply(start)
+    if (buckets.numPositiveBuckets > 0) {
+      // Start from the first histogram. This is what adding it to MutableHistogram.empty(emptyExpBuckets)
+      // results in (the empty scheme can't accommodate it, so addNoCorrection adopts its scheme and values), minus
+      // the intermediate allocations.
+      into.setFrom(first)
+    } else {
+      // zero bucket only histogram: keep the original merge semantics
+      into.setEmpty(HistogramBuckets.emptyExpBuckets)
+      into.addNoCorrection(first)
     }
-    summedHist
+    cforRange { start + 1 to end } { i =>
+      into.addNoCorrection(apply(i))
+    }
   }
 }
 
