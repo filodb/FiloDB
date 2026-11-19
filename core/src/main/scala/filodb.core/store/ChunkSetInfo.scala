@@ -5,7 +5,6 @@ import java.util.concurrent.atomic.AtomicLong
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
-import debox.Buffer
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataSchema}
@@ -338,6 +337,13 @@ object CountingChunkInfoIterator {
 }
 
 /**
+ * Counts data bytes and rows scanned as chunks are iterated.
+ *
+ * The per-query dataBytesScannedCtr is updated for every chunk since it enforces maxBytesScanned.
+ * The instance-level Kamon counter and the samples-scanned consumer are not needed per chunk, and updating
+ * them per chunk showed up as a CPU hotspot. Their counts are accumulated locally and flushed when the
+ * iterator is exhausted or closed.
+ *
  * @param samplesScannedRowCountConsumer accepts a total row count; tracks the samples scanned
  *                                       (see {@link filodb.core.query.SamplesScannedConfig} for details).
  */
@@ -347,8 +353,32 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
                                 samplesScannedRowCountConsumer: Long => Unit,
                                 maxBytesScanned: Long,
                                 queryId: String) extends ChunkInfoIterator {
-  override def close(): Unit = base.close()
-  override def hasNext: Boolean = base.hasNext
+  private var pendingBytes = 0L
+  private var pendingRows = 0L
+
+  private def flushPending(): Unit = {
+    if (pendingRows > 0) {
+      val rows = pendingRows
+      pendingRows = 0
+      samplesScannedRowCountConsumer(rows)
+    }
+    if (pendingBytes > 0) {
+      val bytes = pendingBytes
+      pendingBytes = 0
+      // kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
+      CountingChunkInfoIterator.dataBytesScannedCtr.increment(bytes)
+    }
+  }
+
+  override def close(): Unit = {
+    flushPending()
+    base.close()
+  }
+  override def hasNext: Boolean = {
+    val more = base.hasNext
+    if (!more) flushPending()
+    more
+  }
   override def nextInfoReader: ChunkSetInfoReader = {
     val reader = base.nextInfoReader
     var bytesRead = 0
@@ -367,21 +397,20 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
       iCol += 1
     }
 
-    // Why two counters ?
-    // 1. query stats counter to meter usage by ws/ns. This will eventually be sent as part of query result.
-    dataBytesScannedCtr.addAndGet(bytesRead)
-    samplesScannedRowCountConsumer(reader.numRows)
-    if (dataBytesScannedCtr.get() > maxBytesScanned) {
-      val exMessage = s"Actual raw data bytes scan of ${dataBytesScannedCtr.get()} bytes exceeds limit of " +
+    // Query stats counter to meter usage by ws/ns. This will eventually be sent as part of query result.
+    // Updated per chunk since it enforces the bytes scanned limit.
+    val totalBytesScanned = dataBytesScannedCtr.addAndGet(bytesRead)
+    pendingBytes += bytesRead
+    pendingRows += reader.numRows
+    if (totalBytesScanned > maxBytesScanned) {
+      flushPending()
+      val exMessage = s"Actual raw data bytes scan of ${totalBytesScanned} bytes exceeds limit of " +
         s"${maxBytesScanned} bytes queried per shard. " +
         s"Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer time series matches " +
         s"(b) reduce query time range"
       throw QueryLimitException(exMessage, queryId)
     }
-
-    // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
-    CountingChunkInfoIterator.dataBytesScannedCtr.increment(bytesRead)
     // NOTE: samples-scanned are counted from within QueryUtils.
     reader
   }
@@ -461,11 +490,36 @@ class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end
                             var curWindowEnd: Long = -1L,
                             var curWindowStart: Long = -1L,
                             private var readIndex: Int = 0,
-                            windowInfos: Buffer[ChunkSetInfoReader] = Buffer.empty[ChunkSetInfoReader],
                             isInclusiveRange: Boolean = true)
 extends Iterator[ChunkSetInfoReader] {
   require(step > 0, s"Adjusted step $step not > 0")
   private val infos = rv.chunkInfos(start - window, end)
+
+  // Infos of the current window, held in a concretely typed array deque: windowInfos(winHead until winTail).
+  // A generic Buffer[A] reads elements through ScalaRunTime.array_apply, which was a top CPU hotspot,
+  // and removing from its front is O(n). Here reads are direct and front removal is O(1).
+  private var windowInfos = new Array[ChunkSetInfoReader](8)
+  private var winHead = 0
+  private var winTail = 0
+
+  private def appendWindowInfo(info: ChunkSetInfoReader): Unit = {
+    if (winTail == windowInfos.length) {
+      val size = winTail - winHead
+      // compact in place if at least half the array is free at the front, otherwise grow
+      val dest = if (winHead >= windowInfos.length / 2) windowInfos
+                 else new Array[ChunkSetInfoReader](windowInfos.length * 2)
+      System.arraycopy(windowInfos, winHead, dest, 0, size)
+      // scalastyle:off null
+      // clear vacated slots so evicted readers can be garbage collected
+      if (dest eq windowInfos) java.util.Arrays.fill(windowInfos.asInstanceOf[Array[AnyRef]], size, winTail, null)
+      // scalastyle:on null
+      windowInfos = dest
+      winHead = 0
+      winTail = size
+    }
+    windowInfos(winTail) = info
+    winTail += 1
+  }
 
   final def close(): Unit = infos.close()
 
@@ -493,11 +547,13 @@ extends Iterator[ChunkSetInfoReader] {
     readIndex = 0
 
     // drop initial chunksets of window that are no longer part of the window
-    while (windowInfos.nonEmpty && windowInfos(0).endTime < curWindowStart) {
-      windowInfos.remove(0)
+    while (winHead < winTail && windowInfos(winHead).endTime < curWindowStart) {
+      windowInfos(winHead) = null // scalastyle:ignore
+      winHead += 1
     }
+    if (winHead == winTail) { winHead = 0; winTail = 0 }
 
-    var lastEndTime = if (windowInfos.isEmpty) -1L else windowInfos(windowInfos.length - 1).endTime
+    var lastEndTime = if (winHead == winTail) -1L else windowInfos(winTail - 1).endTime
 
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {
@@ -505,7 +561,7 @@ extends Iterator[ChunkSetInfoReader] {
 
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {
-        windowInfos += next
+        appendWindowInfo(next)
         next.tsVectorAddr = next.vectorAddress(DataSchema.timestampColID)
         try {
           next.tsVectorAccessor = next.vectorAccessor(DataSchema.timestampColID)
@@ -527,19 +583,22 @@ extends Iterator[ChunkSetInfoReader] {
   /**
    * hasNext of ChunkInfoIterator.  Returns true if for current window there is another relevant chunk.
    */
-  final def hasNext: Boolean = readIndex < windowInfos.length
+  final def hasNext: Boolean = winHead + readIndex < winTail
 
   /**
    * Returns the next ChunkSetInfo for the current window
    */
   final def next: ChunkSetInfoReader = {
-    val next = windowInfos(readIndex)
+    val next = windowInfos(winHead + readIndex)
     readIndex += 1
     next
   }
 
   final def lock(): Unit = infos.lock()
   final def unlock(): Unit = infos.unlock()
+
+  // Visible for testing: current capacity of the window infos array
+  private[filodb] def windowInfosCapacity: Int = windowInfos.length
 }
 
 /**

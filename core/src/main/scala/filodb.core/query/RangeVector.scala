@@ -31,6 +31,17 @@ import filodb.memory.format.vectors.Histogram
   */
 trait RangeVectorKey extends java.io.Serializable {
   def labelValues: Map[UTF8Str, UTF8Str]
+
+  /**
+   * Returns a subset of labelValues, as selected by a by/without clause.
+   * Implementations backed by binary records override this to skip materializing labels that are dropped.
+   *
+   * @param labels  the clause labels
+   * @param include true to keep only the labels in `labels` (by),
+   *                false to keep only the labels not in `labels` (without)
+   */
+  def selectLabels(labels: Array[UTF8Str], include: Boolean): Map[UTF8Str, UTF8Str] =
+    labelValues.filter(lv => labels.contains(lv._1) == include)
   def sourceShards: Seq[Int]
   def partIds: Seq[Int]
   def schemaNames: Seq[String]
@@ -66,6 +77,60 @@ class SeqMapConsumer extends MapItemConsumer {
     val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
     pairs += (keyUtf8 -> valUtf8)
   }
+}
+
+/**
+ * A MapItemConsumer which collects only the labels selected by a by/without clause.
+ * Label names are compared against the clause labels directly in the binary record, so labels that are
+ * dropped are never materialized. For a `by` clause the clause label instance is reused as the key, so only
+ * the value is allocated.
+ *
+ * @param labels  the clause labels; typically a handful, so a linear scan is cheaper than hashing
+ * @param include true to keep only the labels in `labels` (by), false to keep the labels not in `labels` (without)
+ */
+final class SelectedLabelsConsumer(labels: Array[UTF8Str], include: Boolean) extends MapItemConsumer {
+  private val builder = Map.newBuilder[UTF8Str, UTF8Str]
+
+  // index in labels of the label name with the given bytes, or -1
+  private def indexOf(base: Any, offset: Long, numBytes: Int): Int = {
+    var i = 0
+    while (i < labels.length) {
+      val l = labels(i)
+      if (l.numBytes == numBytes && UnsafeUtils.equate(base, offset, l.base, l.offset, numBytes)) return i
+      i += 1
+    }
+    -1
+  }
+
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    val keyLen = UTF8StringShort.numBytes(keyBase, keyOffset)
+    val idx = indexOf(keyBase, keyOffset + 1, keyLen)
+    if (include) {
+      if (idx >= 0) builder += labels(idx) -> mapValue(valueBase, valueOffset)
+    } else if (idx < 0) {
+      builder += new UTF8Str(keyBase, keyOffset + 1, keyLen) -> mapValue(valueBase, valueOffset)
+    }
+  }
+
+  private def mapValue(valueBase: Any, valueOffset: Long): UTF8Str =
+    new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
+
+  /** Returns true if the label with the given name is selected */
+  def selects(name: UTF8Str): Boolean = (indexOf(name.base, name.offset, name.numBytes) >= 0) == include
+
+  /** Adds a label; callers should first check it is selected */
+  def add(name: UTF8Str, value: UTF8Str): Unit = builder += name -> value
+
+  def result(): Map[UTF8Str, UTF8Str] = builder.result()
+}
+
+object SelectedLabelsConsumer {
+  // Part key column names are few and fixed per schema, so cache their UTF8 form instead of allocating per key
+  private val columnNames = new java.util.concurrent.ConcurrentHashMap[String, UTF8Str]()
+  private val toUtf8 = new java.util.function.Function[String, UTF8Str] {
+    def apply(name: String): UTF8Str = UTF8Str(name)
+  }
+  def columnNameUtf8(name: String): UTF8Str = columnNames.computeIfAbsent(name, toUtf8)
 }
 
 /**
@@ -111,6 +176,36 @@ final case class PartitionRangeVectorKey(partKeyData: Either[ReadablePartition, 
       }
     }.toMap
   }
+
+  // Decodes only the selected labels straight from the part key, unlike labelValues.filter
+  override def selectLabels(labels: Array[UTF8Str], include: Boolean): Map[UTF8Str, UTF8Str] = {
+    val base = partBase
+    val offset = partOffset
+    val consumer = new SelectedLabelsConsumer(labels, include)
+    var pos = 0
+    val it = partKeyCols.iterator
+    while (it.hasNext) {
+      val c = it.next()
+      c.colType match {
+        case MapColumn =>
+          partSchema.consumeMapItems(base, offset, pos, consumer)
+        case StringColumn | IntColumn | LongColumn =>
+          val name = SelectedLabelsConsumer.columnNameUtf8(c.name)
+          if (consumer.selects(name)) {
+            val value = c.colType match {
+              case StringColumn => partSchema.asZCUTF8Str(base, offset, pos)
+              case IntColumn    => UTF8Str(partSchema.getInt(base, offset, pos).toString)
+              case _            => UTF8Str(partSchema.getLong(base, offset, pos).toString)
+            }
+            consumer.add(name, value)
+          }
+        case _ => throw new UnsupportedOperationException("Not supported yet")
+      }
+      pos += 1
+    }
+    consumer.result()
+  }
+
   override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)} [grp$groupNum]"
 
   def writeToMapBr(rb: RecordBuilderBase): Unit = {
@@ -144,6 +239,14 @@ final case class BrMapRangeVectorKey(base: Any, offset: Long) extends RangeVecto
     BrMapRangeVectorKey.schema.consumeMapItems(base, offset, 0, consumer)
     consumer.pairs.toMap
   }
+
+  // Decodes only the selected labels from the record instead of filtering the full labelValues map
+  override def selectLabels(labels: Array[UTF8Str], include: Boolean): Map[UTF8Str, UTF8Str] = {
+    val consumer = new SelectedLabelsConsumer(labels, include)
+    BrMapRangeVectorKey.schema.consumeMapItems(base, offset, 0, consumer)
+    consumer.result()
+  }
+
   override def sourceShards: Seq[Int] = Nil
   override def partIds: Seq[Int] = Nil
   override def schemaNames: Seq[String] = Nil

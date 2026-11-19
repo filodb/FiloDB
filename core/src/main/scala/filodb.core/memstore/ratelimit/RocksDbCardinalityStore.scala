@@ -122,12 +122,15 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   private val numRunningCompactionsMetric = FilodbMetrics.gauge("card-store-num-running-compactions", tags)
   private val numKeysMetric = FilodbMetrics.gauge("card-store-est-num-keys", tags)
 
-  private val metricsReporter = Observable.interval(1.minute)
+  // Initial delay avoids an immediate tick at construction time; short-lived stores (e.g. tests) would otherwise
+  // race the first metrics read against close()
+  private val metricsReporter = Observable.intervalWithFixedDelay(1.minute, 1.minute)
     .onErrorRestart(Int.MaxValue)
     .foreach(_ => updateMetrics())(GlobalScheduler.globalImplicitScheduler)
 
   var lastMetricsReportTime = 0L
-  private def updateMetrics(): Unit = {
+  // synchronized with close() so that native RocksDB handles are never read after (or while) they are freed
+  private def updateMetrics(): Unit = synchronized {
     if (!closed) {
       val now = System.currentTimeMillis()
       // dump DB stats every 5 minutes
@@ -319,15 +322,17 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   }
   // scalastyle:on method.length
 
-  def close(): Unit = {
-    closed = true
-    metricsReporter.cancel()
-    db.cancelAllBackgroundWork(true)
-    db.close()
-    writeBufferManager.close()
-    cache.close()
-    options.close()
-    val directory = new Directory(dbDirInTmp)
-    directory.deleteRecursively()
+  def close(): Unit = synchronized {
+    if (!closed) {
+      closed = true
+      metricsReporter.cancel()
+      db.cancelAllBackgroundWork(true)
+      db.close()
+      writeBufferManager.close()
+      cache.close()
+      options.close()
+      val directory = new Directory(dbDirInTmp)
+      directory.deleteRecursively()
+    }
   }
 }
