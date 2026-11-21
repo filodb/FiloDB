@@ -18,8 +18,8 @@ import filodb.core.query.{QueryContext, QuerySession}
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
+import filodb.query.{QueryCompletionListener, QueryResponse}
 import filodb.query.ProtoConverters.{PlannerParamsFromProtoConverter, QueryParamsFromProtoConversion}
-import filodb.query.QueryResponse
 import filodb.query.exec.{ClientParams, ExecPlan, ExecPlanWithClientParams, UnsupportedChunkSource}
 
 /**
@@ -29,12 +29,16 @@ import filodb.query.exec.{ClientParams, ExecPlan, ExecPlanWithClientParams, Unsu
  * @param serverAllocator allocator for Flight buffers
  * @param location location advertised to clients for where to connect for flight RPCs. Not used during invocation now.
  * @param sysConfig system config
+ * @param completionListener notified exactly once for every request this producer executes
  */
 class FiloDBMultiPartitionFlightProducer(
                                     val queryPlannerSelector: String => QueryPlanner,
                                     val serverAllocator: BufferAllocator,
                                     val location: Location,
-                                    val sysConfig: Config) extends NoOpFlightProducer with FlightQueryResultStreaming {
+                                    val sysConfig: Config,
+                                    override val completionListener: QueryCompletionListener =
+                                      QueryCompletionListener.NoOp
+                                  ) extends NoOpFlightProducer with FlightQueryResultStreaming {
 
   override def listActions(context: FlightProducer.CallContext,
                            listener: FlightProducer.StreamListener[ActionType]): Unit = {
@@ -102,7 +106,9 @@ object FiloDBMultiPartitionFlightProducer {
                           serverAllocator: BufferAllocator,
                           location: Location,
                           allConfig: Config,
-                          executor: ExecutorService): BindableService = {
+                          executor: ExecutorService,
+                          completionListener: QueryCompletionListener = QueryCompletionListener.NoOp
+                         ): BindableService = {
     val noAuthHandler = new ServerAuthHandler {
       override def isValid(token: Array[Byte]): Optional[String] = Optional.of("")
 
@@ -111,7 +117,8 @@ object FiloDBMultiPartitionFlightProducer {
     }
 
     FlightGrpcUtils.createFlightService(serverAllocator,
-      new FiloDBMultiPartitionFlightProducer(queryPlannerSelector, serverAllocator, location, allConfig),
+      new FiloDBMultiPartitionFlightProducer(
+        queryPlannerSelector, serverAllocator, location, allConfig, completionListener),
       noAuthHandler,
       executor)
   }

@@ -23,9 +23,10 @@ import filodb.core.query._
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.core.{SpreadChange, TestData}
 import filodb.grpc.GrpcMultiPartitionQueryService
+import filodb.http.RecordingQueryCompletionListener.awaitExactlyOnce
 import filodb.memory.format.ZeroCopyUTF8String.StringToUTF8
 import filodb.query.exec._
-import filodb.query.{ProtoConverters, QueryResult}
+import filodb.query.{ProtoConverters, QueryCompletionListener, QueryResult}
 
 /**
  * End-to-end tests for the FiloDBMultiPartitionFlightProducer path:
@@ -126,7 +127,8 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
   // -----------------------------------------------------------------------
   // Step 5: FiloDBMultiPartitionFlightProducer + plain gRPC server (port 48816)
   // -----------------------------------------------------------------------
-  private val multiPartServer = startGrpcServer(_ => planner, settings, Scheduler.global)
+  private val flightCompletionListener = new RecordingQueryCompletionListener
+  private val multiPartServer = startGrpcServer(_ => planner, settings, Scheduler.global, flightCompletionListener)
 
   // Allocator for test clients — child of root so leaks are detectable
   private val testAllocator =
@@ -149,8 +151,10 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
   // -----------------------------------------------------------------------
 
   private def startGrpcServer(queryPlannerSelector: String => QueryPlanner,
-                              filoSettings: FilodbSettings, scheduler: Scheduler): PromQLGrpcServer = {
-    val server = new PromQLGrpcServer(queryPlannerSelector, filoSettings, scheduler)
+                              filoSettings: FilodbSettings, scheduler: Scheduler,
+                              completionListener: QueryCompletionListener = QueryCompletionListener.NoOp
+                             ): PromQLGrpcServer = {
+    val server = new PromQLGrpcServer(queryPlannerSelector, filoSettings, scheduler, completionListener)
     server.start()
     server
   }
@@ -164,11 +168,13 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
     promQL: String,
     startSecs: Long = 0L,
     stepSecs: Long  = 1L,
-    endSecs: Long   = 100L
+    endSecs: Long   = 100L,
+    processFailure: Boolean = true
   ): QueryResult = {
     val qCtx = QueryContext(
       origQueryParams = PromQlQueryParams(promQL, startSecs, stepSecs, endSecs),
-      plannerParams   = PlannerParams(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, 0)))))
+      plannerParams   = PlannerParams(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, 0))),
+                                      processFailure = processFailure))
     // unfortunately spread 0 above does not take effect since the proto request does not have the field,
     // and does not get propagated to remote planner
     val remoteExec = PromQLFlightRemoteExec(
@@ -262,6 +268,40 @@ class FiloDBMultiPartitionFlightProducerSpec extends AnyFunSpec
 
       qRes.result.foreach(_.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close()))
       testAllocator.getAllocatedMemory shouldEqual allocBefore
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // QueryCompletionListener
+  // -----------------------------------------------------------------------
+
+  describe("QueryCompletionListener - Flight") {
+
+    it("should be notified exactly once per request with the query context and the query stats") {
+      flightCompletionListener.clear()
+
+      val qRes = executeViaMultiPartFlightServer("""cpu_usage{region="region1", _ns_="timeseries"}""")
+      qRes.result.length shouldEqual 2
+
+      val events = awaitExactlyOnce(flightCompletionListener)
+      var timeSeriesScanned = 0L
+      events.head.queryStats.foreach { case (_, stat) => timeSeriesScanned += stat.timeSeriesScanned.get() }
+      timeSeriesScanned should be > 0L
+
+      qRes.result.foreach(_.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close()))
+    }
+
+    it("should still return the query response when the listener throws") {
+      flightCompletionListener.clear()
+      flightCompletionListener.failOnNext = true
+
+      val qRes = executeViaMultiPartFlightServer("""cpu_usage{region="region1", _ns_="timeseries"}""")
+      qRes.result.length shouldEqual 2
+
+      awaitExactlyOnce(flightCompletionListener)
+      flightCompletionListener.failOnNext shouldEqual false // the throwing callback did run
+
+      qRes.result.foreach(_.asInstanceOf[ArrowSerializedRangeVector].vsrs.foreach(_.close()))
     }
   }
 }
