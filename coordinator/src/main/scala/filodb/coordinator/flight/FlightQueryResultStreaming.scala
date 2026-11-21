@@ -1,6 +1,6 @@
 package filodb.coordinator.flight
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.concurrent.duration._
@@ -27,7 +27,7 @@ import filodb.core.memstore.FiloSchedulers
 import filodb.core.metrics.FilodbMetrics
 import filodb.core.query._
 import filodb.memory.data.Shutdown
-import filodb.query.{BadQueryException, QueryError, QueryResponse, QueryResult}
+import filodb.query.{BadQueryException, QueryCompletionListener, QueryError, QueryResponse, QueryResult}
 import filodb.query.exec.ExecPlan
 
 object FlightQueryResultStreaming {
@@ -92,6 +92,18 @@ trait FlightQueryResultStreaming extends StrictLogging {
   def serverAllocator: BufferAllocator
 
   def sysConfig: com.typesafe.config.Config
+
+  /**
+   * Notified exactly once for every executed request, after the response has been completed.
+   */
+  protected def completionListener: QueryCompletionListener = QueryCompletionListener.NoOp
+
+  /**
+   * Used to pass {@link QueryStats} to {@link #completionListener}.
+   * FIXME: A little awkward; if required, this class should be reworked
+   *        to pass QueryStats directly to the listener.
+   */
+  private val queryStatsByPlanId = new ConcurrentHashMap[String, QueryStats]()
 
   // metric names below are kept same as QueryActor for continuity and easier migration to Flight
   private val epRequests = FilodbMetrics.counter("queryactor-execplan-requests", Map.empty)
@@ -180,6 +192,13 @@ trait FlightQueryResultStreaming extends StrictLogging {
           execPlanLatency.record(timeTaken,
             Map("plan" -> q.getClass.getSimpleName, "dataset" -> q.dataset.toString))
           querySpan.finish()
+          val resultQueryStats = Option(queryStatsByPlanId.remove(q.planId)).getOrElse(querySession.queryStats)
+          try {
+            completionListener.onQueryComplete(q.queryContext, resultQueryStats)
+          } catch {
+            case t: Throwable =>
+              logger.error(s"QueryCompletionListener failed for queryId=${q.queryContext.queryId}", t)
+          }
           querySession.close()
         })
         // Entire server-side pipeline runs on the query scheduler, just like QueryActor. Nothing here blocks:
@@ -461,6 +480,9 @@ trait FlightQueryResultStreaming extends StrictLogging {
                                         mayBePartial: Boolean = false,
                                         partialResultReason: Option[String] = None,
                                         warnings: QueryWarnings = QueryWarnings()): Unit = {
+    // Stats will be passed to the completionListener during executePhysicalPlanAndRespond.
+    queryStatsByPlanId.put(execPlan.planId, s)
+
     t.foreach { e =>
       logQueryErrors(e, execPlan)
       queryExecuteSpan.fail(e.getMessage)

@@ -40,10 +40,28 @@ import filodb.query.exec.{ExecPlanWithClientParams, UnsupportedChunkSource}
  *                             to use for materializing the query.
  * @param filoSettings         FiloDB settings.
  * @param scheduler            Scheduler used to dispatch the exec plan
+ * @param completionListener   Invoked after each request is completed.
  */
 class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
-                       filoSettings: FilodbSettings, scheduler: Scheduler)
+                       filoSettings: FilodbSettings, scheduler: Scheduler,
+                       completionListener: QueryCompletionListener = QueryCompletionListener.NoOp)
   extends StrictLogging {
+
+  /**
+   * Reports a finished request to the [[completionListener]]. Never throws.
+   */
+  private def notifyCompletion(queryContext: QueryContext, qr: QueryResponse): Unit = {
+    try {
+      val stats = qr match {
+        case res: QueryResult => res.queryStats
+        case err: QueryError  => err.queryStats
+      }
+      completionListener.onQueryComplete(queryContext, stats)
+    } catch {
+      case t: Throwable => logger.error(
+        s"QueryCompletionListener failed for queryId=${queryContext.queryId}", t)
+    }
+  }
 
   private val port  = if (filoSettings.grpcPortList.isDefined && filoSettings.localhostOrdinal.isDefined) {
     val ordinal = filoSettings.localhostOrdinal.get
@@ -83,7 +101,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
     val location = Location.forGrpcInsecure("localhost", port) // TODO - fetch public hostname (okay - not used for now)
     val executor = Executors.newCachedThreadPool() // io executor on which flight requests are served
     FiloDBMultiPartitionFlightProducer.makeBindableService(queryPlannerSelector, FlightAllocator.serverAllocator,
-        location, filoSettings.allConfig, executor)
+        location, filoSettings.allConfig, executor, completionListener)
   }
 
   private class PromQLGrpcService extends RemoteExecImplBase {
@@ -220,13 +238,18 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
 
             val exec = queryPlanner.materialize(logicalPlan, qContext)
             queryPlanner.dispatchExecPlan(exec, querySession, rp.span)
-              .map((qr: QueryResponse) => rp.processQueryResponse(qr))
+              .map { (qr: QueryResponse) =>
+                rp.processQueryResponse(qr)
+                notifyCompletion(qContext, qr)
+              }
           } { querySession =>
             Task.eval(querySession.close())
           }.runAsync {
             case Left(t) =>
               logger.error("Caught failure while executing query", t)
-              rp.processQueryResponse(QueryError(qContext.queryId, QueryStats(), t))
+              val errorResponse = QueryError(qContext.queryId, QueryStats(), t)
+              rp.processQueryResponse(errorResponse)
+              notifyCompletion(qContext, errorResponse)
               rp.span.fail("Query execution failed", t)
             case Right(_) => rp.span.mark("query execution successful")
           }
@@ -282,13 +305,18 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
               execPlan, filodb.query.exec.ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis),
               querySession)
             execPlan.dispatcher.dispatch(execPlanWParams, UnsupportedChunkSource())
-              .map((qr: QueryResponse) => rp.processQueryResponse(qr))
+              .map { (qr: QueryResponse) =>
+                rp.processQueryResponse(qr)
+                notifyCompletion(queryContext, qr)
+              }
           } { querySession =>
             Task.eval(querySession.close())
           }.runAsync {
             case Left(t) =>
               logger.error("Caught failure while dispatching execution plan", t)
-              rp.processQueryResponse(QueryError(queryContext.queryId, QueryStats(), t))
+              val errorResponse = QueryError(queryContext.queryId, QueryStats(), t)
+              rp.processQueryResponse(errorResponse)
+              notifyCompletion(queryContext, errorResponse)
               span.fail("Query execution failed", t)
             case Right(_) => rp.span.mark("query execution successful")
           }
